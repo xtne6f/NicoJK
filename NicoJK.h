@@ -76,6 +76,7 @@ private:
 	struct FORCE_ELEM {
 		int jkID;
 		int force;
+		bool bFixedName;
 		tstring name;
 		std::string chatStreamID;
 	};
@@ -100,9 +101,13 @@ private:
 	bool TogglePlugin(bool bEnabled);
 	void ToggleStreamCallback(bool bSet);
 	static unsigned int __stdcall SyncThread(void *pParam);
+	static std::vector<NETWORK_SERVICE_ID_ELEM>::iterator LowerBoundNetworkServiceID(std::vector<NETWORK_SERVICE_ID_ELEM>::iterator first,
+	                                                                                 std::vector<NETWORK_SERVICE_ID_ELEM>::iterator last, DWORD ntsID);
+	static std::vector<FORCE_ELEM>::iterator LowerBoundJKID(std::vector<FORCE_ELEM>::iterator first,
+	                                                        std::vector<FORCE_ELEM>::iterator last, int jkID);
 	void LoadFromIni();
 	void SaveToIni();
-	void LoadForceListFromIni();
+	void LoadForceListFromIni(const tstring &logfileFolder);
 	void LoadRplListFromIni(LPCTSTR section, std::vector<RPL_ELEM> *pRplList);
 	void SaveRplListToIni(LPCTSTR section, const std::vector<RPL_ELEM> &rplList, bool bClearSection = true);
 	HWND GetFullscreenWindow();
