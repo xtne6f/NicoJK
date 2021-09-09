@@ -435,8 +435,8 @@ void CNicoJK::LoadFromIni()
 	s_.commentSize			= GetBufferedProfileInt(buf.data(), TEXT("commentSize"), 100);
 	s_.commentSizeMin		= GetBufferedProfileInt(buf.data(), TEXT("commentSizeMin"), 16);
 	s_.commentSizeMax		= GetBufferedProfileInt(buf.data(), TEXT("commentSizeMax"), 9999);
-	GetBufferedProfileString(buf.data(), TEXT("commentFontName"), TEXT("ＭＳ Ｐゴシック"), s_.commentFontName, _countof(s_.commentFontName));
-	GetBufferedProfileString(buf.data(), TEXT("commentFontNameMulti"), TEXT("ＭＳ Ｐゴシック"), s_.commentFontNameMulti, _countof(s_.commentFontNameMulti));
+	GetBufferedProfileString(buf.data(), TEXT("commentFontName"), TEXT("メイリオ"), s_.commentFontName, _countof(s_.commentFontName));
+	GetBufferedProfileString(buf.data(), TEXT("commentFontNameMulti"), TEXT("メイリオ"), s_.commentFontNameMulti, _countof(s_.commentFontNameMulti));
 	GetBufferedProfileString(buf.data(), TEXT("commentFontNameEmoji"), TEXT(""), s_.commentFontNameEmoji, _countof(s_.commentFontNameEmoji));
 	s_.bCommentFontBold		= GetBufferedProfileInt(buf.data(), TEXT("commentFontBold"), 1) != 0;
 	s_.bCommentFontAntiAlias = GetBufferedProfileInt(buf.data(), TEXT("commentFontAntiAlias"), 1) != 0;
