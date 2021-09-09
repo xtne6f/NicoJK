@@ -1,6 +1,7 @@
 ﻿#include "stdafx.h"
 #include "Util.h"
 #include "CommentWindow.h"
+#include <functional>
 #include <emmintrin.h>
 #include <gdiplus.h>
 
@@ -11,14 +12,16 @@
 #define ASSERT assert
 #endif
 
+namespace
+{
 #if 0 // アセンブリ検索用
 #define MAGIC_NUMBER(x) { g_dwMagic=(x); }
-static DWORD g_dwMagic;
+DWORD g_dwMagic;
 #else
 #define MAGIC_NUMBER
 #endif
 
-static void ApplyOpacityPlain(DWORD *pBits, int range, BYTE opacityA, BYTE opacityRGB)
+void ApplyOpacityPlain(DWORD *pBits, int range, BYTE opacityA, BYTE opacityRGB)
 {
 	MAGIC_NUMBER(0x12452356);
 	for (int i = 0; i < range; ++i) {
@@ -27,7 +30,7 @@ static void ApplyOpacityPlain(DWORD *pBits, int range, BYTE opacityA, BYTE opaci
 	}
 }
 
-static void ApplyOpacitySse2(DWORD *pBits, int range, BYTE opacityA, BYTE opacityRGB)
+void ApplyOpacitySse2(DWORD *pBits, int range, BYTE opacityA, BYTE opacityRGB)
 {
 	int top = 3 - reinterpret_cast<ULONG_PTR>(pBits + 3) / sizeof(DWORD) % 4;
 	ApplyOpacityPlain(pBits, min(top, range), opacityA, opacityRGB);
@@ -49,13 +52,124 @@ static void ApplyOpacitySse2(DWORD *pBits, int range, BYTE opacityA, BYTE opacit
 	}
 }
 
-static void ApplyOpacity(DWORD *pBits, int range, BYTE opacityA, BYTE opacityRGB, bool bUseSse2)
+void ApplyOpacity(DWORD *pBits, int range, BYTE opacityA, BYTE opacityRGB, bool bUseSse2)
 {
 	if (bUseSse2) {
 		ApplyOpacitySse2(pBits, range, opacityA, opacityRGB);
 	} else {
 		ApplyOpacityPlain(pBits, range, opacityA, opacityRGB);
 	}
+}
+
+extern const int EMOJI_RANGE_TABLE[100];
+
+bool MeasureString(Gdiplus::Graphics &g, const tstring &text, const Gdiplus::Font &font, const Gdiplus::Font &fontEmoji,
+                   Gdiplus::REAL lineHeight, Gdiplus::PointF origin, Gdiplus::RectF *boundingBox = nullptr,
+                   const std::function<void(LPCTSTR, int, const Gdiplus::Font &, const Gdiplus::PointF &)> &func = nullptr)
+{
+	Gdiplus::RectF bb(0, 0, 0, 0);
+	bool bOk = false;
+	if (&font == &fontEmoji) {
+		// そのまま計測
+		if (!boundingBox || g.MeasureString(text.c_str(), static_cast<int>(text.size()), &font, origin, &bb) == Gdiplus::Ok) {
+			bOk = true;
+			if (func) {
+				func(text.c_str(), static_cast<int>(text.size()), font, origin);
+			}
+		}
+		if (boundingBox) {
+			*boundingBox = bb;
+		}
+		return bOk;
+	}
+
+	// 絵文字とその他のフォントを切り替えながら計測
+	auto it = text.begin();
+	auto itEnd = text.end();
+	auto itFrom = text.begin();
+	auto itTo = text.begin();
+	int hi = 0;
+	const int *pEnd = EMOJI_RANGE_TABLE + _countof(EMOJI_RANGE_TABLE);
+	const Gdiplus::Font *pFont = nullptr;
+	Gdiplus::PointF initialOrigin = origin;
+
+	for (;;) {
+		// 終端に必ず改行があるかのように処理する
+		int c = it == itEnd ? L'\n' : *it;
+		if (0xD800 <= c && c <= 0xDBFF) {
+			// Highサロゲート
+			hi = c;
+			++it;
+			continue;
+		}
+		if (hi != 0 && 0xDC00 <= c && c <= 0xDFFF) {
+			// HighサロゲートにつづくLowサロゲート
+			c = ((hi - 0xD800) << 10) + c + 0x2400;
+		}
+		hi = 0;
+
+		const Gdiplus::Font *pSwitchFont = nullptr;
+		const int *pBound = std::upper_bound(EMOJI_RANGE_TABLE, pEnd, c);
+		if (pBound != pEnd && ((pBound - EMOJI_RANGE_TABLE) & 1)) {
+			// 絵文字か特定の異体字セレクタ
+			if (pFont != &fontEmoji && c != 0xFE0E && c != 0xFE0F) {
+				// 絵文字のフォントに切り替え
+				pSwitchFont = &fontEmoji;
+			}
+		} else {
+			if (pFont != &font) {
+				// その他のフォントに切り替え
+				pSwitchFont = &font;
+			}
+		}
+
+		// フォントが切り替わったか改行か終端
+		if (pSwitchFont || c == L'\n') {
+			if (!pFont && c == L'\n') {
+				// おもに空行
+				pFont = pSwitchFont ? pSwitchFont : &font;
+			}
+			if (pFont) {
+				Gdiplus::RectF tmpbb;
+				if (itTo == itFrom) {
+					if (c == L'\n') {
+						// 改行のみ
+						origin.X = initialOrigin.X;
+						origin.Y += lineHeight;
+					}
+				} else if (g.MeasureString(&*itFrom, static_cast<int>(itTo - itFrom), pFont, origin, &tmpbb) == Gdiplus::Ok) {
+					bOk = true;
+					if (func) {
+						func(&*itFrom, static_cast<int>(itTo - itFrom), *pFont, origin);
+					}
+					origin.X += tmpbb.Width;
+					bb.Width = max(bb.Width, origin.X - initialOrigin.X);
+					bb.Height = max(bb.Height, origin.Y + tmpbb.Height - initialOrigin.Y);
+					if (c == L'\n') {
+						origin.X = initialOrigin.X;
+						origin.Y += lineHeight;
+					}
+				}
+			}
+			if (it == itEnd) {
+				break;
+			} else if (c == L'\n') {
+				// 次の文字から開始。フォント未定
+				itFrom = it + 1;
+				pFont = nullptr;
+			} else {
+				// この文字から開始
+				itFrom = itTo;
+				pFont = pSwitchFont;
+			}
+		}
+		itTo = ++it;
+	}
+	if (boundingBox) {
+		*boundingBox = bb;
+	}
+	return bOk;
+}
 }
 
 bool CCommentWindow::Initialize(HINSTANCE hinst, bool *pbEnableOsdCompositor, bool bSetHookOsdCompositor)
@@ -148,6 +262,7 @@ CCommentWindow::CCommentWindow()
 {
 	fontName_[0] = TEXT('\0');
 	fontNameMulti_[0] = TEXT('\0');
+	fontNameEmoji_[0] = TEXT('\0');
 }
 
 CCommentWindow::~CCommentWindow()
@@ -229,13 +344,14 @@ void CCommentWindow::Destroy()
 
 // コメントの描画スタイルを設定する
 // 動的変更には対応していないので、これを呼んだらDestroy()&Create()するべき
-void CCommentWindow::SetStyle(LPCTSTR fontName, LPCTSTR fontNameMulti, bool bBold, bool bAntiAlias,
+void CCommentWindow::SetStyle(LPCTSTR fontName, LPCTSTR fontNameMulti, LPCTSTR fontNameEmoji, bool bBold, bool bAntiAlias,
                               int fontOutline, bool bUseOsdCompositor, bool bUseTexture, bool bUseDrawingThread)
 {
 	WaitForIdleDrawingThread();
 	ClearChat();
 	_tcsncpy_s(fontName_, fontName, _TRUNCATE);
 	_tcsncpy_s(fontNameMulti_, fontNameMulti, _TRUNCATE);
+	_tcsncpy_s(fontNameEmoji_, fontNameEmoji, _TRUNCATE);
 	fontStyle_ = bBold ? Gdiplus::FontStyleBold : Gdiplus::FontStyleRegular;
 	bAntiAlias_ = bAntiAlias;
 	fontOutline_ = max(fontOutline, 0);
@@ -376,8 +492,16 @@ void CCommentWindow::AddChat(LPCTSTR text, COLORREF color, CHAT_POSITION positio
 		c.bSmall = size != CHAT_SIZE_DEFAULT;
 		c.alignFactor = position==CHAT_POS_DEFAULT || align==CHAT_ALIGN_LEFT ? 0 : align==CHAT_ALIGN_RIGHT ? 2 : 1;
 		c.bInsertLast = position!=CHAT_POS_DEFAULT && bInsertLast;
-		c.text = text;
-		c.bMultiLine = c.text.find(TEXT('\n')) != tstring::npos;
+		c.text.reserve(_tcslen(text));
+		c.bMultiLine = false;
+		for (size_t i = 0; text[i]; ++i) {
+			if (text[i] != TEXT('\r')) {
+				c.text.push_back(text[i]);
+				if (text[i] == TEXT('\n')) {
+					c.bMultiLine = true;
+				}
+			}
+		}
 		c.bDrew = false;
 		// 一時リストに追加(描画時にchatList_にマージ)
 		lock_recursive_mutex lock(chatLock_);
@@ -664,17 +788,37 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 			}
 		}
 		g.SetTextRenderingHint(bAntiAlias_ ? Gdiplus::TextRenderingHintAntiAlias : Gdiplus::TextRenderingHintSingleBitPerPixel);
-		Gdiplus::REAL fontEm = (Gdiplus::REAL)(fontScale_ * height / actLineCount * 0.75);
-		Gdiplus::REAL fontEmSmall = (Gdiplus::REAL)(fontSmallScale_ * height / actLineCount * 0.75);
-		Gdiplus::Font font(fontName_, fontEm, fontStyle_);
-		Gdiplus::Font fontSmall(fontName_, fontEmSmall, fontStyle_);
+		Gdiplus::REAL fontEm = static_cast<Gdiplus::REAL>(fontScale_ * height / actLineCount);
+		Gdiplus::REAL fontEmSmall = static_cast<Gdiplus::REAL>(fontSmallScale_ * height / actLineCount);
+		int fontStyle = fontStyle_;
+		Gdiplus::Font font(fontName_, fontEm * 0.75f, fontStyle);
+		Gdiplus::Font fontSmall(fontName_, fontEmSmall * 0.75f, fontStyle);
 		// 複数行用フォント
-		Gdiplus::Font tmpFontMulti(fontNameMulti_, fontEm, fontStyle_);
-		Gdiplus::Font tmpFontMultiSmall(fontNameMulti_, fontEmSmall, fontStyle_);
+		Gdiplus::Font tmpFontMulti(fontNameMulti_, fontEm * 0.75f, fontStyle);
+		Gdiplus::Font tmpFontMultiSmall(fontNameMulti_, fontEmSmall * 0.75f, fontStyle);
+		// 絵文字用フォント
+		Gdiplus::Font tmpFontEmoji(fontNameEmoji_[0] ? fontNameEmoji_ : fontName_, fontEm * 0.75f, fontStyle);
+		Gdiplus::Font tmpFontEmojiSmall(fontNameEmoji_[0] ? fontNameEmoji_ : fontName_, fontEmSmall * 0.75f, fontStyle);
+
 		// 可能なら同じオブジェクトを参照しておく(いいことあるかもしれないので)
-		bool bSameMultiFont = !_tcscmp(fontName_, fontNameMulti_);
-		const Gdiplus::Font &fontMulti = bSameMultiFont ? font : tmpFontMulti;
-		const Gdiplus::Font &fontMultiSmall = bSameMultiFont ? fontSmall : tmpFontMultiSmall;
+		bool bSameMulti = !_tcscmp(fontName_, fontNameMulti_);
+		bool bSameEmoji = !fontNameEmoji_[0] || !_tcscmp(fontName_, fontNameEmoji_);
+		bool bSameMultiEmoji = !fontNameEmoji_[0] || !_tcscmp(fontNameMulti_, fontNameEmoji_);
+		const Gdiplus::Font &fontMulti = bSameMulti ? font : tmpFontMulti;
+		const Gdiplus::Font &fontMultiSmall = bSameMulti ? fontSmall : tmpFontMultiSmall;
+		const Gdiplus::Font &fontEmoji = bSameEmoji ? font : tmpFontEmoji;
+		const Gdiplus::Font &fontEmojiSmall = bSameEmoji ? fontSmall : tmpFontEmojiSmall;
+		const Gdiplus::Font &fontMultiEmoji = bSameMultiEmoji ? fontMulti : tmpFontEmoji;
+		const Gdiplus::Font &fontMultiEmojiSmall = bSameMultiEmoji ? fontMultiSmall : tmpFontEmojiSmall;
+
+		Gdiplus::FontFamily fontFamily;
+		Gdiplus::FontFamily fontFamilyMulti;
+		Gdiplus::FontFamily fontFamilyEmoji;
+		Gdiplus::FontFamily fontFamilyMultiEmoji;
+		font.GetFamily(&fontFamily);
+		fontMulti.GetFamily(&fontFamilyMulti);
+		fontEmoji.GetFamily(&fontFamilyEmoji);
+		fontMultiEmoji.GetFamily(&fontFamilyMultiEmoji);
 
 		{
 		lock_recursive_mutex lock(chatLock_);
@@ -683,9 +827,11 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 		while (!chatPoolList_.empty()) {
 			CHAT &c = chatPoolList_.front();
 			// 実際の描画サイズを計測
-			const Gdiplus::Font *pFont = c.bMultiLine ? &(c.bSmall ? fontMultiSmall : fontMulti) : &(c.bSmall ? fontSmall : font);
+			const Gdiplus::Font &selFont = c.bMultiLine ? (c.bSmall ? fontMultiSmall : fontMulti) : (c.bSmall ? fontSmall : font);
+			const Gdiplus::Font &selFontEmoji = c.bMultiLine ? (c.bSmall ? fontMultiEmojiSmall : fontMultiEmoji) : (c.bSmall ? fontEmojiSmall : fontEmoji);
+			Gdiplus::REAL selFontEm = c.bSmall ? fontEmSmall : fontEm;
 			Gdiplus::RectF rcDraw;
-			if (g.MeasureString(c.text.c_str(), -1, pFont, Gdiplus::PointF(0, 0), &rcDraw) != Gdiplus::Ok) {
+			if (!MeasureString(g, c.text, selFont, selFontEmoji, selFontEm, Gdiplus::PointF(0, 0), &rcDraw)) {
 				chatPoolList_.pop_front();
 				continue;
 			}
@@ -794,11 +940,15 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 		Gdiplus::GraphicsPath grPath;
 
 		for (std::list<CHAT>::iterator it = chatList_.begin(); it != chatList_.end(); ++it) {
-			const Gdiplus::Font *pFont = it->bMultiLine ? &(it->bSmall ? fontMultiSmall : fontMulti) : &(it->bSmall ? fontSmall : font);
+			const Gdiplus::Font &selFont = it->bMultiLine ? (it->bSmall ? fontMultiSmall : fontMulti) : (it->bSmall ? fontSmall : font);
+			const Gdiplus::Font &selFontEmoji = it->bMultiLine ? (it->bSmall ? fontMultiEmojiSmall : fontMultiEmoji) : (it->bSmall ? fontEmojiSmall : fontEmoji);
+			Gdiplus::REAL selFontEm = it->bSmall ? fontEmSmall : fontEm;
+			const Gdiplus::FontFamily &selFontFamily = it->bMultiLine ? fontFamilyMulti : fontFamily;
+			const Gdiplus::FontFamily &selFontFamilyEmoji = it->bMultiLine ? fontFamilyMultiEmoji : fontFamilyEmoji;
 			if (currentWindowWidth_ < 0) {
 				// 実際の描画サイズを計測
 				Gdiplus::RectF rcDraw;
-				if (g.MeasureString(it->text.c_str(), -1, pFont, Gdiplus::PointF(0, 0), &rcDraw) == Gdiplus::Ok) {
+				if (MeasureString(g, it->text, selFont, selFontEmoji, selFontEm, Gdiplus::PointF(0, 0), &rcDraw)) {
 					it->currentDrawWidth = (int)rcDraw.Width;
 					it->currentDrawHeight = (int)rcDraw.Height;
 				}
@@ -813,8 +963,6 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 			if (actLine < 0 || actLineCount <= actLine || lineDrawCount_ <= actLine) {
 				continue;
 			}
-			Gdiplus::FontFamily fontFamily;
-			pFont->GetFamily(&fontFamily);
 			Gdiplus::ARGB color = Gdiplus::Color::MakeARGB(it->colorA, it->colorR, it->colorG, it->colorB);
 			Gdiplus::Color foreColor(color | Gdiplus::Color::AlphaMask);
 			Gdiplus::Color shadowColor(3*foreColor.GetR() + 6*foreColor.GetG() + foreColor.GetB() < 255 ? Gdiplus::Color::White : Gdiplus::Color::Black);
@@ -894,8 +1042,11 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 					Gdiplus::PointF pt((Gdiplus::REAL)t.rc.left, (Gdiplus::REAL)t.rc.top);
 					if (fontOutline_) {
 						grPath.Reset();
-						grPath.AddString(t.text.c_str(), -1, &fontFamily, pFont->GetStyle(), pFont->GetSize() / 0.76f,
-						                 pt + Gdiplus::PointF(shadowOffset / 2 + 1, shadowOffset / 2 + 1), nullptr);
+						MeasureString(g, t.text, selFont, selFontEmoji, selFontEm, pt + Gdiplus::PointF(shadowOffset / 2 + 1, shadowOffset / 2 + 1), nullptr,
+						              [fontStyle, selFontEm, &grPath, &selFont, &selFontFamily, &selFontFamilyEmoji](
+						                  LPCTSTR text, int len, const Gdiplus::Font &font, const Gdiplus::PointF &origin) {
+						                  grPath.AddString(text, len, &font == &selFont ? &selFontFamily : &selFontFamilyEmoji, fontStyle, selFontEm, origin, nullptr);
+						              });
 						pgTexture_->SetCompositingMode(bOpaque ? Gdiplus::CompositingModeSourceOver : Gdiplus::CompositingModeSourceCopy);
 						pgTexture_->SetSmoothingMode(bAntiAlias_ ? Gdiplus::SmoothingModeHighQuality : Gdiplus::SmoothingModeNone);
 						Gdiplus::Pen penShadow(shadowColor, shadowOffset / 2);
@@ -907,14 +1058,20 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 						pgTexture_->SetCompositingMode(bOpaque ? Gdiplus::CompositingModeSourceOver : Gdiplus::CompositingModeSourceCopy);
 						Gdiplus::SolidBrush brShadow(shadowColor);
 						// Win7においてU+2588の上端1ピクセルはみ出す現象がみられたため+1
-						pgTexture_->DrawString(t.text.c_str(), -1, pFont, pt + Gdiplus::PointF(shadowOffset, shadowOffset + 1), &brShadow);
+						MeasureString(g, t.text, selFont, selFontEmoji, selFontEm, pt + Gdiplus::PointF(shadowOffset, shadowOffset + 1), nullptr,
+						              [this, &brShadow](LPCTSTR text, int len, const Gdiplus::Font &font, const Gdiplus::PointF &origin) {
+						                  pgTexture_->DrawString(text, len, &font, origin, &brShadow);
+						              });
 						pgTexture_->SetCompositingMode(bAntiAlias_ ? Gdiplus::CompositingModeSourceOver : Gdiplus::CompositingModeSourceCopy);
-						pgTexture_->DrawString(t.text.c_str(), -1, pFont, pt + Gdiplus::PointF(0, 1), &br);
+						MeasureString(g, t.text, selFont, selFontEmoji, selFontEm, pt + Gdiplus::PointF(0, 1), nullptr,
+						              [this, &br](LPCTSTR text, int len, const Gdiplus::Font &font, const Gdiplus::PointF &origin) {
+						                  pgTexture_->DrawString(text, len, &font, origin, &br);
+						              });
 					}
 					jt = textureList_.insert(jtMin, std::move(t));
 				}
 			}
-			int px, py = (int)((0.5 + actLine) * height / actLineCount - (pFont->GetHeight(96) + shadowOffset) / 2);
+			int px, py = (int)((0.5 + actLine) * height / actLineCount - (selFont.GetHeight(96) + shadowOffset) / 2);
 			if (it->position == CHAT_POS_DEFAULT) {
 				px = width - (int)(rts_ - it->pts) * (width + it->currentDrawWidth) / displayDuration_;
 			} else {
@@ -937,8 +1094,11 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 				Gdiplus::PointF pt((Gdiplus::REAL)px, (Gdiplus::REAL)py);
 				if (fontOutline_) {
 					grPath.Reset();
-					grPath.AddString(it->text.c_str(), -1, &fontFamily, pFont->GetStyle(), pFont->GetSize() / 0.76f,
-					                 pt + Gdiplus::PointF(shadowOffset / 2 + 1, shadowOffset / 2 + 1), nullptr);
+					MeasureString(g, it->text, selFont, selFontEmoji, selFontEm, pt + Gdiplus::PointF(shadowOffset / 2 + 1, shadowOffset / 2 + 1), nullptr,
+					              [fontStyle, selFontEm, &grPath, &selFont, &selFontFamily, &selFontFamilyEmoji](
+					                  LPCTSTR text, int len, const Gdiplus::Font &font, const Gdiplus::PointF &origin) {
+					                  grPath.AddString(text, len, &font == &selFont ? &selFontFamily : &selFontFamilyEmoji, fontStyle, selFontEm, origin, nullptr);
+					              });
 					g.SetCompositingMode(bAntiAlias_ ? Gdiplus::CompositingModeSourceOver : Gdiplus::CompositingModeSourceCopy);
 					g.SetSmoothingMode(bAntiAlias_ ? Gdiplus::SmoothingModeHighQuality : Gdiplus::SmoothingModeNone);
 					Gdiplus::Pen penShadow(shadowColor, shadowOffset / 2);
@@ -948,8 +1108,14 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 				} else {
 					g.SetCompositingMode(bAntiAlias_ ? Gdiplus::CompositingModeSourceOver : Gdiplus::CompositingModeSourceCopy);
 					Gdiplus::SolidBrush brShadow(shadowColor);
-					g.DrawString(it->text.c_str(), -1, pFont, pt + Gdiplus::PointF(shadowOffset, shadowOffset + 1), &brShadow);
-					g.DrawString(it->text.c_str(), -1, pFont, pt + Gdiplus::PointF(0, 1), &br);
+					MeasureString(g, it->text, selFont, selFontEmoji, selFontEm, pt + Gdiplus::PointF(shadowOffset, shadowOffset + 1), nullptr,
+					              [&g, &brShadow](LPCTSTR text, int len, const Gdiplus::Font &font, const Gdiplus::PointF &origin) {
+					                  g.DrawString(text, len, &font, origin, &brShadow);
+					              });
+					MeasureString(g, it->text, selFont, selFontEmoji, selFontEm, pt + Gdiplus::PointF(0, 1), nullptr,
+					              [&g, &br](LPCTSTR text, int len, const Gdiplus::Font &font, const Gdiplus::PointF &origin) {
+					                  g.DrawString(text, len, &font, origin, &br);
+					              });
 				}
 			}
 
@@ -1068,4 +1234,64 @@ LRESULT CALLBACK CCommentWindow::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 		break;
 	}
 	return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+namespace
+{
+const int EMOJI_RANGE_TABLE[] =
+{
+	// Wikipedia「UnicodeのEmojiの一覧」のうち2021年時点のMS Gothicに含まれないもの
+	0x2139, 0x2140,
+	0x231A, 0x231C,
+	0x2328, 0x2329,
+	0x23CF, 0x23D0,
+	0x23E9, 0x23F4,
+	0x23F8, 0x23FB,
+	0x25FB, 0x25FF,
+	0x2614, 0x2616,
+	0x2618, 0x2619,
+	0x267B, 0x267C,
+	0x267E, 0x2680,
+	0x2692, 0x2698,
+	0x2699, 0x269A,
+	0x269B, 0x269D,
+	0x26A0, 0x26A2,
+	0x26AA, 0x26AC,
+	0x26B0, 0x26B2,
+	0x26BD, 0x26BF,
+	0x26C4, 0x26C6,
+	0x26C8, 0x26C9,
+	0x26CE, 0x26D0,
+	0x26D1, 0x26D2,
+	0x26D3, 0x26D5,
+	0x26E9, 0x26EB,
+	0x26F0, 0x26F6,
+	0x26F7, 0x26FB,
+	0x26FD, 0x26FE,
+	0x2705, 0x2706,
+	0x270A, 0x270C,
+	0x2728, 0x2729,
+	0x274C, 0x274D,
+	0x274E, 0x274F,
+	0x2753, 0x2756,
+	0x2757, 0x2758,
+	0x2795, 0x2798,
+	0x27B0, 0x27B1,
+	0x27BF, 0x27C0,
+	0x2B05, 0x2B08,
+	0x2B1B, 0x2B1D,
+	0x2B50, 0x2B51,
+	0x2B55, 0x2B56,
+	// 異体字セレクタ
+	0xFE0E, 0xFE10,
+	0x1F004, 0x1F005,
+	0x1F0CF, 0x1F0D0,
+	0x1F170, 0x1F172,
+	0x1F17E, 0x1F180,
+	0x1F18E, 0x1F18F,
+	0x1F191, 0x1F19B,
+	0x1F1E6, 0x1F200,
+	// 「その他の記号及び絵記号」-「拡張された記号と絵文字-A」
+	0x1F300, 0x1FB00,
+};
 }

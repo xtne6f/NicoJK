@@ -47,6 +47,7 @@ private:
 		int commentSizeMax;
 		TCHAR commentFontName[LF_FACESIZE];
 		TCHAR commentFontNameMulti[LF_FACESIZE];
+		TCHAR commentFontNameEmoji[LF_FACESIZE];
 		bool bCommentFontBold;
 		bool bCommentFontAntiAlias;
 		int commentDuration;

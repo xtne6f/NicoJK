@@ -437,6 +437,7 @@ void CNicoJK::LoadFromIni()
 	s_.commentSizeMax		= GetBufferedProfileInt(buf.data(), TEXT("commentSizeMax"), 9999);
 	GetBufferedProfileString(buf.data(), TEXT("commentFontName"), TEXT("ＭＳ Ｐゴシック"), s_.commentFontName, _countof(s_.commentFontName));
 	GetBufferedProfileString(buf.data(), TEXT("commentFontNameMulti"), TEXT("ＭＳ Ｐゴシック"), s_.commentFontNameMulti, _countof(s_.commentFontNameMulti));
+	GetBufferedProfileString(buf.data(), TEXT("commentFontNameEmoji"), TEXT(""), s_.commentFontNameEmoji, _countof(s_.commentFontNameEmoji));
 	s_.bCommentFontBold		= GetBufferedProfileInt(buf.data(), TEXT("commentFontBold"), 1) != 0;
 	s_.bCommentFontAntiAlias = GetBufferedProfileInt(buf.data(), TEXT("commentFontAntiAlias"), 1) != 0;
 	s_.commentDuration		= GetBufferedProfileInt(buf.data(), TEXT("commentDuration"), CCommentWindow::DISPLAY_DURATION);
@@ -1808,7 +1809,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			logListDisplayedSize_ = 0;
 			bPendingTimerUpdateList_ = false;
 			lastCalcText_.clear();
-			commentWindow_.SetStyle(s_.commentFontName, s_.commentFontNameMulti, s_.bCommentFontBold, s_.bCommentFontAntiAlias,
+			commentWindow_.SetStyle(s_.commentFontName, s_.commentFontNameMulti, s_.commentFontNameEmoji, s_.bCommentFontBold, s_.bCommentFontAntiAlias,
 			                        s_.commentFontOutline, s_.bUseOsdCompositor, s_.bUseTexture, s_.bUseDrawingThread);
 			commentWindow_.SetCommentSize(s_.commentSize, s_.commentSizeMin, s_.commentSizeMax, s_.commentLineMargin);
 			commentWindow_.SetDisplayDuration(s_.commentDuration);

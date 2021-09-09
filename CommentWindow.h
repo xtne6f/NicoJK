@@ -42,7 +42,7 @@ public:
 	~CCommentWindow();
 	bool Create(HWND hwndParent);
 	void Destroy();
-	void SetStyle(LPCTSTR fontName, LPCTSTR fontNameMulti, bool bBold, bool bAntiAlias,
+	void SetStyle(LPCTSTR fontName, LPCTSTR fontNameMulti, LPCTSTR fontNameEmoji, bool bBold, bool bAntiAlias,
 	              int fontOutline, bool bUseOsdCompositor, bool bUseTexture, bool bUseDrawingThread);
 	void SetCommentSize(int size, int sizeMin, int sizeMax, int lineMargin);
 	void SetDrawLineCount(int lineDrawCount);
@@ -131,6 +131,7 @@ private:
 	double fontSmallScale_;
 	TCHAR fontName_[LF_FACESIZE];
 	TCHAR fontNameMulti_[LF_FACESIZE];
+	TCHAR fontNameEmoji_[LF_FACESIZE];
 	int fontStyle_;
 	bool bAntiAlias_;
 	BYTE opacity_;
