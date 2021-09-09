@@ -114,7 +114,6 @@ CCommentWindow::CCommentWindow()
 	, hbmWork_(nullptr)
 	, pBits_(nullptr)
 	, hdcWork_(nullptr)
-	, hDrawingThread_(nullptr)
 	, hDrawingEvent_(nullptr)
 	, hDrawingIdleEvent_(nullptr)
 	, bQuitDrawingThread_(false)
@@ -168,10 +167,8 @@ bool CCommentWindow::Create(HWND hwndParent)
 				hDrawingIdleEvent_ = CreateEvent(nullptr, TRUE, TRUE, nullptr);
 				if (hDrawingEvent_ && hDrawingIdleEvent_) {
 					bQuitDrawingThread_ = false;
-					hDrawingThread_ = reinterpret_cast<HANDLE>(::_beginthreadex(nullptr, 0, DrawingThread, this, 0, nullptr));
-					if (hDrawingThread_) {
-						SetThreadPriority(hDrawingThread_, THREAD_PRIORITY_ABOVE_NORMAL);
-					}
+					drawingThread_ = std::thread([this](){ DrawingThread(); });
+					SetThreadPriority(drawingThread_.native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
 				}
 			}
 			osdCompositor_.SetContainerWindow(hwndParent_);
@@ -187,14 +184,10 @@ bool CCommentWindow::Create(HWND hwndParent)
 
 void CCommentWindow::Destroy()
 {
-	if (hDrawingThread_) {
+	if (drawingThread_.joinable()) {
 		bQuitDrawingThread_ = true;
 		SetEvent(hDrawingEvent_);
-		if (WaitForSingleObject(hDrawingThread_, 30000) == WAIT_TIMEOUT) {
-			TerminateThread(hDrawingThread_, 1);
-		}
-		CloseHandle(hDrawingThread_);
-		hDrawingThread_ = nullptr;
+		drawingThread_.join();
 	}
 	if (hDrawingIdleEvent_) {
 		CloseHandle(hDrawingIdleEvent_);
@@ -377,7 +370,7 @@ void CCommentWindow::AddChat(LPCTSTR text, COLORREF color, CHAT_POSITION positio
 		c.bMultiLine = c.text.find(TEXT('\n')) != tstring::npos;
 		c.bDrew = false;
 		// 一時リストに追加(描画時にchatList_にマージ)
-		CBlockLock lock(&chatLock_);
+		lock_recursive_mutex lock(chatLock_);
 		chatPoolList_.splice(chatPoolList_.end(), lc);
 	}
 }
@@ -386,7 +379,7 @@ void CCommentWindow::AddChat(LPCTSTR text, COLORREF color, CHAT_POSITION positio
 void CCommentWindow::ScatterLatestChats(int duration)
 {
 	if (hwnd_ && duration > 0) {
-		CBlockLock lock(&chatLock_);
+		lock_recursive_mutex lock(chatLock_);
 		std::list<CHAT>::iterator it = chatPoolList_.begin();
 		DWORD latestPts = 0;
 		int latestNum = 0;
@@ -478,7 +471,7 @@ void CCommentWindow::Update()
 
 void CCommentWindow::UpdateLayeredWindow()
 {
-	ASSERT(!hDrawingThread_ || WaitForSingleObject(hDrawingIdleEvent_, 0) == WAIT_OBJECT_0);
+	ASSERT(!drawingThread_.joinable() || WaitForSingleObject(hDrawingIdleEvent_, 0) == WAIT_OBJECT_0);
 
 	// GDIオブジェクトを確保
 	RECT rc;
@@ -509,7 +502,7 @@ void CCommentWindow::UpdateLayeredWindow()
 	ReleaseDC(hwnd_, hdc);
 	SelectObject(hdcWork_, hbmOld);
 
-	if (hDrawingThread_) {
+	if (drawingThread_.joinable()) {
 		// あとはスレッドに任せる
 		// 目的は高速化ではなくメインスレッドの拘束時間を減らすこと
 		ResetEvent(hDrawingIdleEvent_);
@@ -520,22 +513,20 @@ void CCommentWindow::UpdateLayeredWindow()
 }
 
 // 描画スレッド
-unsigned int __stdcall CCommentWindow::DrawingThread(void *pParam)
+void CCommentWindow::DrawingThread()
 {
-	CCommentWindow *pThis = static_cast<CCommentWindow*>(pParam);
-	while (WaitForSingleObject(pThis->hDrawingEvent_, INFINITE) == WAIT_OBJECT_0 && !pThis->bQuitDrawingThread_) {
-		pThis->UpdateChat();
+	while (WaitForSingleObject(hDrawingEvent_, INFINITE) == WAIT_OBJECT_0 && !bQuitDrawingThread_) {
+		UpdateChat();
 		// これがシグナル状態のとき描画スレッドはメンバ変数にアクセスしてはいけない
-		SetEvent(pThis->hDrawingIdleEvent_);
+		SetEvent(hDrawingIdleEvent_);
 	}
-	pThis->bQuitDrawingThread_ = true;
-	return 0;
+	bQuitDrawingThread_ = true;
 }
 
 // 描画スレッドがアイドル状態になるのを待つ
 bool CCommentWindow::WaitForIdleDrawingThread()
 {
-	return !hDrawingThread_ || bQuitDrawingThread_ || WaitForSingleObject(hDrawingIdleEvent_, INFINITE) == WAIT_OBJECT_0;
+	return !drawingThread_.joinable() || bQuitDrawingThread_ || WaitForSingleObject(hDrawingIdleEvent_, INFINITE) == WAIT_OBJECT_0;
 }
 
 void CCommentWindow::UpdateChat()
@@ -676,7 +667,7 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 		const Gdiplus::Font &fontMultiSmall = bSameMultiFont ? fontSmall : tmpFontMultiSmall;
 
 		{
-		CBlockLock lock(&chatLock_);
+		lock_recursive_mutex lock(chatLock_);
 
 		// 新しいコメントがあれば重ならないようにリストを再配置する
 		while (!chatPoolList_.empty()) {
@@ -1032,7 +1023,7 @@ LRESULT CALLBACK CCommentWindow::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 			pThis = reinterpret_cast<CCommentWindow*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
 			bool bEmpty;
 			{
-				CBlockLock lock(&pThis->chatLock_);
+				lock_recursive_mutex lock(pThis->chatLock_);
 				bEmpty = pThis->chatList_.empty() && pThis->chatPoolList_.empty();
 			}
 			// 表示する物がないのにウィンドウ(またはOSD)が表示状態かどうか

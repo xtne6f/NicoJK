@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include "OsdCompositor.h"
+#include <atomic>
+#include <thread>
 
 class CCommentWindow
 {
@@ -80,7 +82,7 @@ private:
 	};
 	bool AllocateWorkBitmap(int width, int height, bool *pbRealloc);
 	void UpdateLayeredWindow();
-	static unsigned int __stdcall DrawingThread(void *pParam);
+	void DrawingThread();
 	bool WaitForIdleDrawingThread();
 	void UpdateChat();
 	BOOL UpdateLayeredWindow(HWND hWnd, HDC hdcDst, POINT *pptDst, SIZE *psize, HDC hdcSrc, POINT *pptSrc,
@@ -98,10 +100,10 @@ private:
 	HBITMAP hbmWork_;
 	void *pBits_;
 	HDC hdcWork_;
-	HANDLE hDrawingThread_;
+	std::thread drawingThread_;
 	HANDLE hDrawingEvent_;
 	HANDLE hDrawingIdleEvent_;
-	volatile bool bQuitDrawingThread_;
+	std::atomic_bool bQuitDrawingThread_;
 	int commentSizeMin_;
 	int commentSizeMax_;
 	int lineCount_;

@@ -1,5 +1,10 @@
 ﻿#pragma once
 
+#include <mutex>
+
+typedef std::recursive_mutex recursive_mutex_;
+typedef std::lock_guard<recursive_mutex_> lock_recursive_mutex;
+
 #define FILETIME_MILLISECOND 10000LL
 
 struct FIND_LOGFILE_ELEM {
@@ -58,27 +63,3 @@ void EnumFindFile(LPCTSTR pattern, P enumProc)
 		FindClose(hFind);
 	}
 }
-
-class recursive_mutex_
-{
-public:
-	recursive_mutex_() { InitializeCriticalSection(&cs_); }
-	~recursive_mutex_() { DeleteCriticalSection(&cs_); }
-	void lock() { EnterCriticalSection(&cs_); }
-	void unlock() { LeaveCriticalSection(&cs_); }
-private:
-	recursive_mutex_(const recursive_mutex_&);
-	recursive_mutex_ &operator=(const recursive_mutex_&);
-	CRITICAL_SECTION cs_;
-};
-
-class CBlockLock
-{
-public:
-	CBlockLock(recursive_mutex_ *mtx) : mtx_(mtx) { mtx_->lock(); }
-	~CBlockLock() { mtx_->unlock(); }
-private:
-	CBlockLock(const CBlockLock&);
-	CBlockLock &operator=(const CBlockLock&);
-	recursive_mutex_ *mtx_;
-};

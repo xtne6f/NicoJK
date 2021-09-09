@@ -1,5 +1,8 @@
 ﻿#pragma once
 
+#include <atomic>
+#include <thread>
+
 // プラグインクラス
 class CNicoJK : public TVTest::CTVTestPlugin
 {
@@ -100,7 +103,7 @@ private:
 	};
 	bool TogglePlugin(bool bEnabled);
 	void ToggleStreamCallback(bool bSet);
-	static unsigned int __stdcall SyncThread(void *pParam);
+	void SyncThread();
 	static std::vector<NETWORK_SERVICE_ID_ELEM>::iterator LowerBoundNetworkServiceID(std::vector<NETWORK_SERVICE_ID_ELEM>::iterator first,
 	                                                                                 std::vector<NETWORK_SERVICE_ID_ELEM>::iterator last, DWORD ntsID);
 	static std::vector<FORCE_ELEM>::iterator LowerBoundJKID(std::vector<FORCE_ELEM>::iterator first,
@@ -154,10 +157,10 @@ private:
 	// コメント描画ウィンドウ
 	CCommentWindow commentWindow_;
 	DWORD forwardTick_;
-	HANDLE hSyncThread_;
-	bool bQuitSyncThread_;
-	bool bPendingTimerForward_;
-	bool bHalfSkip_;
+	std::thread syncThread_;
+	std::atomic_bool bQuitSyncThread_;
+	std::atomic_bool bPendingTimerForward_;
+	std::atomic_bool bHalfSkip_;
 	bool bFlipFlop_;
 	LONGLONG forwardOffset_;
 	LONGLONG forwardOffsetDelta_;

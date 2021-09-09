@@ -29,7 +29,6 @@
 #include <utility>
 #include <algorithm>
 #include <tchar.h>
-#include <process.h>
 
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "gdiplus.lib")

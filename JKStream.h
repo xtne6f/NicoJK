@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "Util.h"
+#include <thread>
 
 // 実況データ送受信用のプロセスと通信する
 class CJKStream
@@ -15,11 +16,10 @@ public:
 private:
 	bool CreateWorker(HWND hwnd, UINT msg);
 	static bool CreateJKProcess(HANDLE &hProcess, HANDLE &hAsyncReadPipe, HANDLE &hWritePipe);
-	static unsigned int __stdcall WorkerThread(void *pParam);
-	void WorkerThread_();
+	void WorkerThread();
 
 	recursive_mutex_ workerLock_;
-	HANDLE hWorkerThread_;
+	std::thread workerThread_;
 	HANDLE hWorkerEvent_;
 	HANDLE hProcess_;
 	bool bWorkerCreated_;

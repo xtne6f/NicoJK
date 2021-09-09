@@ -109,7 +109,6 @@ CNicoJK::CNicoJK()
 	, lastUpdateListTick_(0)
 	, lastCalcWidth_(0)
 	, forwardTick_(0)
-	, hSyncThread_(nullptr)
 	, bQuitSyncThread_(false)
 	, bPendingTimerForward_(false)
 	, bHalfSkip_(false)
@@ -339,12 +338,10 @@ bool CNicoJK::TogglePlugin(bool bEnabled)
 					if (VerifyVersionInfo(&vi, VER_MAJORVERSION, VerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL)) &&
 					    SUCCEEDED(DwmIsCompositionEnabled(&bCompEnabled)) && bCompEnabled) {
 						bQuitSyncThread_ = false;
-						hSyncThread_ = reinterpret_cast<HANDLE>(_beginthreadex(nullptr, 0, SyncThread, this, 0, nullptr));
-						if (hSyncThread_) {
-							SetThreadPriority(hSyncThread_, THREAD_PRIORITY_ABOVE_NORMAL);
-						}
+						syncThread_ = std::thread([this]() { SyncThread(); });
+						SetThreadPriority(syncThread_.native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
 					}
-					if (!hSyncThread_) {
+					if (!syncThread_.joinable()) {
 						m_pApp->AddLog(L"Aeroが無効のため設定timerIntervalのリフレッシュ同期機能はオフになります。");
 						SetTimer(hForce_, TIMER_FORWARD, 166667 / -s_.timerInterval, nullptr);
 					}
@@ -368,29 +365,27 @@ bool CNicoJK::TogglePlugin(bool bEnabled)
 	}
 }
 
-unsigned int __stdcall CNicoJK::SyncThread(void *pParam)
+void CNicoJK::SyncThread()
 {
-	CNicoJK *pThis = static_cast<CNicoJK*>(pParam);
 	DWORD count = 0;
 	int timeout = 0;
-	while (!pThis->bQuitSyncThread_) {
+	while (!bQuitSyncThread_) {
 		if (FAILED(DwmFlush())) {
 			// ビジーに陥らないように
 			Sleep(500);
 		}
 		if (count >= 10000) {
 			// 捌き切れない量のメッセージを送らない
-			if (pThis->bPendingTimerForward_ && --timeout >= 0) {
+			if (bPendingTimerForward_ && --timeout >= 0) {
 				continue;
 			}
 			count -= 10000;
 			timeout = 30;
-			pThis->bPendingTimerForward_ = true;
-			SendNotifyMessage(pThis->hForce_, WM_TIMER, TIMER_FORWARD, 0);
+			bPendingTimerForward_ = true;
+			SendNotifyMessage(hForce_, WM_TIMER, TIMER_FORWARD, 0);
 		}
-		count += pThis->bHalfSkip_ ? -pThis->s_.timerInterval / 2 : -pThis->s_.timerInterval;
+		count += bHalfSkip_ ? -s_.timerInterval / 2 : -s_.timerInterval;
 	}
-	return 0;
 }
 
 void CNicoJK::ToggleStreamCallback(bool bSet)
@@ -780,7 +775,7 @@ bool CNicoJK::GetChannelNetworkServiceID(int tuningSpace, int channelIndex, DWOR
 // 再生中のストリームのTOT時刻(取得からの経過時間で補正済み)をUTCで取得する
 LONGLONG CNicoJK::GetCurrentTot()
 {
-	CBlockLock lock(&streamLock_);
+	lock_recursive_mutex lock(streamLock_);
 	DWORD tick = GetTickCount();
 	if (llftTot_ < 0) {
 		// TOTを取得できていない
@@ -1943,11 +1938,9 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			jkStream_.Close();
 			currentJK_ = -1;
 
-			if (hSyncThread_) {
+			if (syncThread_.joinable()) {
 				bQuitSyncThread_ = true;
-				WaitForSingleObject(hSyncThread_, INFINITE);
-				CloseHandle(hSyncThread_);
-				hSyncThread_ = nullptr;
+				syncThread_.join();
 			}
 			ToggleStreamCallback(false);
 			m_pApp->SetWindowMessageCallback(nullptr);
@@ -2272,10 +2265,10 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			break;
 		case TIMER_FORWARD:
 			bFlipFlop_ = !bFlipFlop_;
-			if (hSyncThread_ || !bHalfSkip_ || bFlipFlop_) {
+			if (syncThread_.joinable() || !bHalfSkip_ || bFlipFlop_) {
 				bool resyncComment = false;
 				{
-					CBlockLock lock(&streamLock_);
+					lock_recursive_mutex lock(streamLock_);
 					if (bResyncComment_) {
 						resyncComment = true;
 						bResyncComment_ = false;
@@ -2406,7 +2399,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 	case WM_RESET_STREAM:
 		dprintf(TEXT("CNicoJK::ForceDialogProcMain() WM_RESET_STREAM\n")); // DEBUG
 		{
-			CBlockLock lock(&streamLock_);
+			lock_recursive_mutex lock(streamLock_);
 			llftTot_ = -1;
 		}
 		ReadFromLogfile(-1);
@@ -2753,7 +2746,7 @@ BOOL CALLBACK CNicoJK::StreamCallback(BYTE *pData, void *pClientData)
 			pThis->pcrPids_[0] = -1;
 		}
 		//dprintf(TEXT("CNicoJK::StreamCallback() PCR\n")); // DEBUG
-		CBlockLock lock(&pThis->streamLock_);
+		lock_recursive_mutex lock(pThis->streamLock_);
 		DWORD tick = GetTickCount();
 		// 2秒以上PCRを取得できていない→ポーズから回復?
 		bool bReset = tick - pThis->pcrTick_ >= 2000;
@@ -2825,7 +2818,7 @@ BOOL CALLBACK CNicoJK::StreamCallback(BYTE *pData, void *pClientData)
 					// UTCに変換
 					llft += -32400000LL * FILETIME_MILLISECOND;
 					dprintf(TEXT("CNicoJK::StreamCallback() TOT\n")); // DEBUG
-					CBlockLock lock(&pThis->streamLock_);
+					lock_recursive_mutex lock(pThis->streamLock_);
 					// 時刻が変化したときだけ
 					if (llft != pThis->llftTot_) {
 						pThis->llftTotPending_ = llft;
