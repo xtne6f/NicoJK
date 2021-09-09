@@ -4,6 +4,12 @@
 #include <atomic>
 #include <thread>
 
+namespace Gdiplus
+{
+	class Bitmap;
+	class Graphics;
+}
+
 class CCommentWindow
 {
 public:
@@ -61,7 +67,10 @@ private:
 		DWORD pts;
 		DWORD count;
 		int line;
-		Gdiplus::ARGB color;
+		BYTE colorB;
+		BYTE colorG;
+		BYTE colorR;
+		BYTE colorA;
 		CHAT_POSITION position;
 		bool bSmall;
 		BYTE alignFactor;
@@ -76,9 +85,19 @@ private:
 		bool bUsed;
 		bool bSmall;
 		RECT rc;
-		Gdiplus::ARGB color;
+		BYTE colorB;
+		BYTE colorG;
+		BYTE colorR;
+		BYTE colorA;
 		tstring text;
-		bool IsMatch(const CHAT &c) const { return c.color == color && c.bSmall == bSmall && c.text == text; }
+		bool IsMatch(const CHAT &c) const {
+			return c.colorB == colorB &&
+			       c.colorG == colorG &&
+			       c.colorR == colorR &&
+			       c.colorA == colorA &&
+			       c.bSmall == bSmall &&
+			       c.text == text;
+		}
 	};
 	bool AllocateWorkBitmap(int width, int height, bool *pbRealloc);
 	void UpdateLayeredWindow();
@@ -132,8 +151,8 @@ private:
 	bool bShowOsd_;
 	bool bUseTexture_;
 	bool bUseDrawingThread_;
-	std::unique_ptr<Gdiplus::Bitmap> pTextureBitmap_;
-	std::unique_ptr<Gdiplus::Graphics> pgTexture_;
+	Gdiplus::Bitmap *pTextureBitmap_;
+	Gdiplus::Graphics *pgTexture_;
 	int currentTextureHeight_;
 	std::list<TEXTURE> textureList_;
 	RECT rcUnused_;

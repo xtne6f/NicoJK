@@ -2,6 +2,9 @@
 #include "Util.h"
 #include "CommentWindow.h"
 #include <emmintrin.h>
+#include <gdiplus.h>
+
+#pragma comment(lib, "gdiplus.lib")
 
 #ifndef ASSERT
 #include <cassert>
@@ -137,6 +140,8 @@ CCommentWindow::CCommentWindow()
 	, bShowOsd_(false)
 	, bUseTexture_(false)
 	, bUseDrawingThread_(false)
+	, pTextureBitmap_(nullptr)
+	, pgTexture_(nullptr)
 	, currentTextureHeight_(0)
 	, bForceRefreshDirty_(false)
 	, debugFlags_(0)
@@ -216,8 +221,10 @@ void CCommentWindow::Destroy()
 	autoHideCount_ = 0;
 	parentSizedCount_ = 0;
 
-	pgTexture_.reset();
-	pTextureBitmap_.reset();
+	delete pgTexture_;
+	pgTexture_ = nullptr;
+	delete pTextureBitmap_;
+	pTextureBitmap_ = nullptr;
 }
 
 // コメントの描画スタイルを設定する
@@ -361,7 +368,10 @@ void CCommentWindow::AddChat(LPCTSTR text, COLORREF color, CHAT_POSITION positio
 		c.pts = rts_ + delay;
 		c.count = ++chatCount_;
 		c.line = INT_MAX;
-		c.color = Gdiplus::Color::MakeARGB(bAntiAlias_ ? backOpacity : backOpacity ? 255 : 0, GetRValue(color), GetGValue(color), GetBValue(color));
+		c.colorB = GetBValue(color);
+		c.colorG = GetGValue(color);
+		c.colorR = GetRValue(color);
+		c.colorA = bAntiAlias_ ? backOpacity : backOpacity ? 255 : 0;
 		c.position = position;
 		c.bSmall = size != CHAT_SIZE_DEFAULT;
 		c.alignFactor = position==CHAT_POS_DEFAULT || align==CHAT_ALIGN_LEFT ? 0 : align==CHAT_ALIGN_RIGHT ? 2 : 1;
@@ -644,11 +654,11 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 		if (bUseTexture_) {
 			// テクスチャ用ビットマップを確保
 			if (!pTextureBitmap_ || (int)pTextureBitmap_->GetWidth() != textureWidth || (int)pTextureBitmap_->GetHeight() != height) {
-				pgTexture_.reset();
-				pTextureBitmap_.reset();
+				delete pgTexture_;
+				delete pTextureBitmap_;
 				// Premultの方がかなり軽負荷 (参考: http://www.codeproject.com/Tips/66909/Rendering-fast-with-GDI-What-to-do-and-what-not-to )
-				pTextureBitmap_.reset(new Gdiplus::Bitmap(textureWidth, height, PixelFormat32bppPARGB));
-				pgTexture_.reset(new Gdiplus::Graphics(pTextureBitmap_.get()));
+				pTextureBitmap_ = new Gdiplus::Bitmap(textureWidth, height, PixelFormat32bppPARGB);
+				pgTexture_ = new Gdiplus::Graphics(pTextureBitmap_);
 				pgTexture_->SetTextRenderingHint(bAntiAlias_ ? Gdiplus::TextRenderingHintAntiAlias : Gdiplus::TextRenderingHintSingleBitPerPixel);
 				textureList_.clear();
 			}
@@ -805,10 +815,11 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 			}
 			Gdiplus::FontFamily fontFamily;
 			pFont->GetFamily(&fontFamily);
-			Gdiplus::Color foreColor(it->color | Gdiplus::Color::AlphaMask);
+			Gdiplus::ARGB color = Gdiplus::Color::MakeARGB(it->colorA, it->colorR, it->colorG, it->colorB);
+			Gdiplus::Color foreColor(color | Gdiplus::Color::AlphaMask);
 			Gdiplus::Color shadowColor(3*foreColor.GetR() + 6*foreColor.GetG() + foreColor.GetB() < 255 ? Gdiplus::Color::White : Gdiplus::Color::Black);
-			Gdiplus::Color backColor1(Gdiplus::Color(it->color).GetA(), shadowColor.GetR(), shadowColor.GetG(), shadowColor.GetB());
-			Gdiplus::Color backColor2(bAntiAlias_ ? it->color : backColor1.GetValue());
+			Gdiplus::Color backColor1(Gdiplus::Color(color).GetA(), shadowColor.GetR(), shadowColor.GetG(), shadowColor.GetB());
+			Gdiplus::Color backColor2(bAntiAlias_ ? color : backColor1.GetValue());
 			bool bOpaque = backColor1.GetA() != 0;
 			int entireDrawWith = it->currentDrawWidth + (int)shadowOffset + 3;
 			int entireDrawHeight = it->currentDrawHeight + (int)shadowOffset + 3;
@@ -863,7 +874,10 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 					// テクスチャが見つからなかったので作る
 					TEXTURE t;
 					SetRect(&t.rc, minPos.x, minPos.y, minPos.x + entireDrawWith, minPos.y + entireDrawHeight);
-					t.color = it->color;
+					t.colorB = it->colorB;
+					t.colorG = it->colorG;
+					t.colorR = it->colorR;
+					t.colorA = it->colorA;
 					t.bSmall = it->bSmall;
 					t.text = it->text;
 					pgTexture_->SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
@@ -910,7 +924,7 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 			g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
 			if (jt != textureList_.end()) {
 				// テクスチャを使う
-				g.DrawImage(pTextureBitmap_.get(), px, py,
+				g.DrawImage(pTextureBitmap_, px, py,
 				            jt->rc.left, jt->rc.top, jt->rc.right - jt->rc.left, jt->rc.bottom - jt->rc.top, Gdiplus::UnitPixel);
 				jt->bUsed = true;
 			} else {
@@ -980,7 +994,7 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 				pgTexture_->FillRectangle(&br, 0, 0, textureWidth, height);
 			}
 			g.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
-			g.DrawImage(pTextureBitmap_.get(), 0, 0, textureWidth / 4, height / 4);
+			g.DrawImage(pTextureBitmap_, 0, 0, textureWidth / 4, height / 4);
 			prcUnused->top = min(max(static_cast<LONG>(height / 4), prcUnused->top), prcUnused->bottom);
 			prcUnusedWoShita->top = min(max(static_cast<LONG>(height / 4), prcUnusedWoShita->top), prcUnusedWoShita->bottom);
 		}

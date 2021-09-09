@@ -21,7 +21,6 @@
 #include <windows.h>
 #include <WindowsX.h>
 #include <objbase.h>
-#include <GdiPlus.h>
 #include <vector>
 #include <list>
 #include <regex>
@@ -31,7 +30,6 @@
 #include <tchar.h>
 
 #pragma comment(lib, "winmm.lib")
-#pragma comment(lib, "gdiplus.lib")
 
 // NOMINMAXではGdiPlus.hが通らない
 #undef min
