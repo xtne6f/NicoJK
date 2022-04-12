@@ -100,6 +100,7 @@ private:
 		}
 	};
 	bool AllocateWorkBitmap(int width, int height, bool *pbRealloc);
+	bool IsParentSized();
 	void UpdateLayeredWindow();
 	void DrawingThread();
 	bool WaitForIdleDrawingThread();
@@ -147,6 +148,7 @@ private:
 	int autoHideCount_;
 	int parentSizedCount_;
 	RECT rcParent_;
+	RECT rcOsdSurface_;
 	COsdCompositor osdCompositor_;
 	bool bUseOsd_;
 	bool bShowOsd_;

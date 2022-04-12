@@ -263,6 +263,9 @@ CCommentWindow::CCommentWindow()
 	fontName_[0] = TEXT('\0');
 	fontNameMulti_[0] = TEXT('\0');
 	fontNameEmoji_[0] = TEXT('\0');
+	RECT rcZero = {};
+	rcParent_ = rcZero;
+	rcOsdSurface_ = rcZero;
 }
 
 CCommentWindow::~CCommentWindow()
@@ -440,6 +443,23 @@ void CCommentWindow::OnParentMove()
 	}
 }
 
+bool CCommentWindow::IsParentSized()
+{
+	if (hwnd_) {
+		RECT rc;
+		if (GetWindowRect(hwndParent_, &rc) && !EqualRect(&rc, &rcParent_)) {
+			return true;
+		}
+		if (bUseOsd_ && bShowOsd_) {
+			// 動画サイズだけ変化するかもしれないため
+			if (osdCompositor_.GetSurfaceRect(&rc) && !EqualRect(&rc, &rcOsdSurface_)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 void CCommentWindow::OnParentSize()
 {
 	if (hwnd_) {
@@ -448,23 +468,26 @@ void CCommentWindow::OnParentSize()
 			osdCompositor_.DeleteTexture(0, 0);
 			bShowOsd_ = false;
 			RECT rc;
-			if (osdCompositor_.GetSurfaceRect(&rc) && rc.right-rc.left > 0 && rc.bottom-rc.top > 0) {
-				// 左上と右下にテクスチャ登録することでOSDの描画領域を動画全体に拡げる
-				BITMAPINFO bmi = {};
-				bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-				bmi.bmiHeader.biWidth = 1;
-				bmi.bmiHeader.biHeight = 1;
-				bmi.bmiHeader.biPlanes = 1;
-				bmi.bmiHeader.biBitCount = 32;
-				bmi.bmiHeader.biCompression = BI_RGB;
-				void *pBits;
-				HBITMAP hbm = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &pBits, nullptr, 0);
-				if (hbm) {
-					*static_cast<DWORD*>(pBits) = 0/*0xFF00FF00*/;
-					osdCompositor_.AddTexture(hbm, 0, 0, true, 0);
-					osdCompositor_.AddTexture(hbm, rc.right-rc.left-1, rc.bottom-rc.top-1, true, 0);
-					DeleteObject(hbm);
-					bShowOsd_ = true;
+			if (osdCompositor_.GetSurfaceRect(&rc)) {
+				rcOsdSurface_ = rc;
+				if (rc.right - rc.left > 0 && rc.bottom - rc.top > 0) {
+					// 左上と右下にテクスチャ登録することでOSDの描画領域を動画全体に拡げる
+					BITMAPINFO bmi = {};
+					bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+					bmi.bmiHeader.biWidth = 1;
+					bmi.bmiHeader.biHeight = 1;
+					bmi.bmiHeader.biPlanes = 1;
+					bmi.bmiHeader.biBitCount = 32;
+					bmi.bmiHeader.biCompression = BI_RGB;
+					void *pBits;
+					HBITMAP hbm = CreateDIBSection(nullptr, &bmi, DIB_RGB_COLORS, &pBits, nullptr, 0);
+					if (hbm) {
+						*static_cast<DWORD*>(pBits) = 0/*0xFF00FF00*/;
+						osdCompositor_.AddTexture(hbm, 0, 0, true, 0);
+						osdCompositor_.AddTexture(hbm, rc.right-rc.left-1, rc.bottom-rc.top-1, true, 0);
+						DeleteObject(hbm);
+						bShowOsd_ = true;
+					}
 				}
 			}
 		} else if (!bUseOsd_) {
@@ -1221,8 +1244,7 @@ LRESULT CALLBACK CCommentWindow::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LP
 				pThis->autoHideCount_ = 0;
 			}
 			// OnParentMove()/OnParentSize()が適切なタイミングで呼ばれるのが理想だが、最低限のポーリングもする
-			RECT rc;
-			if (GetWindowRect(pThis->hwndParent_, &rc) && !EqualRect(&rc, &pThis->rcParent_)) {
+			if (pThis->IsParentSized()) {
 				if (++pThis->parentSizedCount_ >= 2) {
 					pThis->OnParentSize();
 				}
