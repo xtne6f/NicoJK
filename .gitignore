@@ -13,3 +13,4 @@
 !*.vcxproj.filters
 !.gitignore
 !README
+*.FileListAbsolute.txt
