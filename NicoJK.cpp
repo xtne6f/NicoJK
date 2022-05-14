@@ -874,7 +874,10 @@ void CNicoJK::WriteToLogfile(int jkID, const char *text)
 	}
 }
 
-#define DWORD_MSB(x) ((x) & 0x80000000)
+static inline int CounterDiff(DWORD a, DWORD b)
+{
+	return (a - b) & 0x80000000 ? -static_cast<int>(b - a - 1) - 1 : static_cast<int>(a - b);
+}
 
 // 指定した実況IDの指定時刻のログ1行を読み込む
 // jkIDが負値のときはログファイルを閉じる
@@ -894,7 +897,7 @@ bool CNicoJK::ReadFromLogfile(int jkID, const char **text, unsigned int tmToRead
 		currentReadLogfileJK_ = -1;
 		OutputMessageLog(TEXT("ログファイルの読み込みを終了しました。"));
 	}
-	if (!DWORD_MSB(tick - readLogfileTick_) && currentReadLogfileJK_ < 0 && jkID >= 0) {
+	if (CounterDiff(tick, readLogfileTick_) >= 0 && currentReadLogfileJK_ < 0 && jkID >= 0) {
 		// ファイルチェックを大量に繰りかえすのを防ぐ
 		readLogfileTick_ = tick + READ_LOG_FOLDER_INTERVAL;
 		tstring path;
@@ -2753,7 +2756,7 @@ BOOL CALLBACK CNicoJK::StreamCallback(BYTE *pData, void *pClientData)
 		bool bReset = tick - pThis->pcrTick_ >= 2000;
 		pThis->pcrTick_ = tick;
 		if (pid == pThis->pcrPid_) {
-			long long pcrDiff = DWORD_MSB(pcr - pThis->pcr_) ? -static_cast<long long>(pThis->pcr_ - pcr) : static_cast<long long>(pcr - pThis->pcr_);
+			long long pcrDiff = CounterDiff(pcr, pThis->pcr_);
 			// ラップアラウンド近傍を特別扱いする必要はない(またいでシークする場合だってある)
 
 			if (bReset || 0 <= pcrDiff && pcrDiff < 45000) {
@@ -2764,6 +2767,7 @@ BOOL CALLBACK CNicoJK::StreamCallback(BYTE *pData, void *pClientData)
 				if (pThis->llftTot_ >= 0 && pThis->llftTotPending_ != -1) {
 					long long totDiff = pcrDiff * FILETIME_MILLISECOND / 45;
 					pThis->llftTot_ += totDiff;
+					pThis->totPcr_ += pcr - pThis->pcr_;
 					if (pThis->llftTotLast_ >= 0) {
 						pThis->llftTotLast_ += totDiff;
 					}
@@ -2784,9 +2788,19 @@ BOOL CALLBACK CNicoJK::StreamCallback(BYTE *pData, void *pClientData)
 					pThis->llftTot_ = pThis->llftTotPending_;
 					pThis->totTickLast_ = pThis->totTick_;
 					pThis->totTick_ = pThis->totTickPending_;
+					// TOTの変化と対応するPCRの変化が5秒以上食い違っている場合、TOTがジャンプしたとみなして前回TOTを捨てる
+					if (abs((pThis->llftTot_ - pThis->llftTotLast_) / FILETIME_MILLISECOND - CounterDiff(pcr, pThis->totPcr_) / 45) >= 5000) {
+						pThis->llftTotLast_ = -1;
+						// 状況はシークとそう違わないので読み直しも必要
+						// 食い違い地点をまたいでシークすると二度読み直しが発生するが、解決は簡単ではなさそうなので保留
+						pThis->bResyncComment_ = true;
+					}
 				}
-				// llftTot_に対応するPCRを取得済みであることを示す
-				pThis->llftTotPending_ = -2;
+				if (pThis->llftTotPending_ != -2) {
+					// llftTot_に対応するPCRを取得済みであることを示す
+					pThis->llftTotPending_ = -2;
+					pThis->totPcr_ = pcr;
+				}
 			}
 			pThis->pcr_ = pcr;
 		}
@@ -2830,6 +2844,7 @@ BOOL CALLBACK CNicoJK::StreamCallback(BYTE *pData, void *pClientData)
 							pThis->totTick_ = pThis->totTickPending_;
 							pThis->llftTotLast_ = -1;
 							pThis->llftTotPending_ = -1;
+							pThis->totPcr_ = 0;
 						}
 					}
 				}

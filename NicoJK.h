@@ -201,6 +201,7 @@ private:
 	DWORD totTick_;
 	DWORD totTickLast_;
 	DWORD totTickPending_;
+	DWORD totPcr_;
 	DWORD pcr_;
 	DWORD pcrTick_;
 	int pcrPid_;
