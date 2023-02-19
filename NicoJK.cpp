@@ -7,7 +7,7 @@
 #include "ImportLogUtil.h"
 #include "Util.h"
 #include "JKStream.h"
-#include "TextFileReader.h"
+#include "LogReader.h"
 #include "CommentWindow.h"
 #define TVTEST_PLUGIN_CLASS_IMPLEMENT
 #include "TVTestPlugin.h"
@@ -128,11 +128,6 @@ CNicoJK::CNicoJK()
 	, currentLogfileJK_(-1)
 	, hLogfile_(INVALID_HANDLE_VALUE)
 	, hLogfileLock_(INVALID_HANDLE_VALUE)
-	, currentReadLogfileJK_(-1)
-	, tmZippedLogfileCachedLast_(0)
-	, bReadLogTextNext_(false)
-	, tmReadLogText_(0)
-	, readLogfileTick_(0)
 	, llftTot_(-1)
 	, pcr_(0)
 	, pcrTick_(0)
@@ -142,8 +137,7 @@ CNicoJK::CNicoJK()
 {
 	cookie_[0] = '\0';
 	lastPostComm_[0] = TEXT('\0');
-	readLogText_[0][0] = '\0';
-	readLogText_[1][0] = '\0';
+	logReader_.SetCheckIntervalMsec(READ_LOG_FOLDER_INTERVAL);
 	SETTINGS s = {};
 	s_ = s;
 	pcrPids_[0] = -1;
@@ -197,6 +191,7 @@ bool CNicoJK::Initialize()
 		TCHAR ext[32];
 		_stprintf_s(ext, TEXT("_%u.tmp"), GetCurrentProcessId());
 		tmpSpecFileName_ += ext;
+		logReader_.SetJK0LogfilePath(tmpSpecFileName_.c_str());
 	}
 	// OsdCompositorは他プラグインと共用することがあるので、有効にするならFinalize()まで破棄しない
 	bool bEnableOsdCompositor = GetPrivateProfileInt(TEXT("Setting"), TEXT("enableOsdCompositor"), 0, iniFileName_.c_str()) != 0;
@@ -491,6 +486,7 @@ void CNicoJK::LoadFromIni()
 	if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY) == 0) {
 		s_.logfileFolder.clear();
 	}
+	logReader_.SetLogDirectory(s_.logfileFolder.c_str());
 
 	buf = GetPrivateProfileSectionBuffer(TEXT("Window"), iniFileName_.c_str());
 	s_.rcForce.left			= GetBufferedProfileInt(buf.data(), TEXT("ForceX"), 0);
@@ -838,7 +834,8 @@ void CNicoJK::WriteToLogfile(int jkID, const char *text)
 		TCHAR name[64];
 		_stprintf_s(name, TEXT("\\jk%d"), jkID);
 		tstring path = s_.logfileFolder + name;
-		if (GetChatDate(&tm, text) && (GetFileAttributes(path.c_str()) != INVALID_FILE_ATTRIBUTES || CreateDirectory(path.c_str(), nullptr))) {
+		if (CLogReader::GetChatDate(&tm, text) &&
+		    (GetFileAttributes(path.c_str()) != INVALID_FILE_ATTRIBUTES || CreateDirectory(path.c_str(), nullptr))) {
 			// ロックファイルを開く
 			path += TEXT("\\lockfile");
 			hLogfileLock_ = CreateFile(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -879,185 +876,9 @@ static inline int CounterDiff(DWORD a, DWORD b)
 	return (a - b) & 0x80000000 ? -static_cast<int>(b - a - 1) - 1 : static_cast<int>(a - b);
 }
 
-// 指定した実況IDの指定時刻のログ1行を読み込む
-// jkIDが負値のときはログファイルを閉じる
-// jkID==0は指定ファイル再生(tmpSpecFileName_)を表す特殊な実況IDとする
-// jkID>=0のときtextは必須。戻り値が真のとき*textは次にこのメソッドを呼ぶまで有効
 bool CNicoJK::ReadFromLogfile(int jkID, const char **text, unsigned int tmToRead)
 {
-	if (jkID != 0 && (s_.logfileFolder.empty() || !bUsingLogfileDriver_)) {
-		// ログを読まない
-		jkID = -1;
-	}
-	DWORD tick = GetTickCount();
-	if (currentReadLogfileJK_ >= 0 && currentReadLogfileJK_ != jkID) {
-		// 閉じる
-		readLogfile_.Close();
-		readLogfileTick_ = tick;
-		currentReadLogfileJK_ = -1;
-		OutputMessageLog(TEXT("ログファイルの読み込みを終了しました。"));
-	}
-	if (CounterDiff(tick, readLogfileTick_) >= 0 && currentReadLogfileJK_ < 0 && jkID >= 0) {
-		// ファイルチェックを大量に繰りかえすのを防ぐ
-		readLogfileTick_ = tick + READ_LOG_FOLDER_INTERVAL;
-		tstring path;
-		const char *zippedName = nullptr;
-		TCHAR latestZip[16] = {};
-		if (jkID == 0) {
-			// 指定ファイル再生
-			path = tmpSpecFileName_;
-		} else {
-			// jkIDのログファイル一覧を得る
-			TCHAR pattern[64];
-			_stprintf_s(pattern, TEXT("\\jk%d\\??????????.???"), jkID);
-			// tmToRead以前でもっとも新しいログファイルを探す
-			TCHAR target[16];
-			_stprintf_s(target, TEXT("%010u."), tmToRead + (READ_LOG_FOLDER_INTERVAL / 1000 + 2));
-			TCHAR latestTxt[16] = {};
-			EnumFindFile((s_.logfileFolder + pattern).c_str(), [&](const WIN32_FIND_DATA &fd) {
-				if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 &&
-				    _tcscmp(fd.cFileName, target) < 0 &&
-				    _tcslen(fd.cFileName) == 14) {
-					if (!_tcsicmp(fd.cFileName + 10, TEXT(".txt"))) {
-						// テキスト形式のログ
-						if (_tcscmp(fd.cFileName, latestTxt) > 0) {
-							_tcscpy_s(latestTxt, fd.cFileName);
-						}
-					} else if (!_tcsicmp(fd.cFileName + 10, TEXT(".zip"))) {
-						// アーカイブされたログ
-						if (_tcscmp(fd.cFileName, latestZip) > 0) {
-							_tcscpy_s(latestZip, fd.cFileName);
-						}
-					}
-				}
-			});
-			if (latestTxt[0]) {
-				// 見つかった
-				_stprintf_s(pattern, TEXT("\\jk%d\\%s"), jkID, latestTxt);
-				path = s_.logfileFolder + pattern;
-			}
-		}
-
-		// まずテキスト形式のログを探す
-		if (!path.empty()) {
-			if (readLogfile_.Open(path.c_str())) {
-				// readLogText_[!bReadLogTextNext_]はメソッド内で汎用できる
-				char (&last)[CHAT_TAG_MAX] = readLogText_[!bReadLogTextNext_];
-				unsigned int tmLast;
-				// 最終行がtmToReadより過去なら読む価値無し
-				if (!readLogfile_.ReadLastLine(last, _countof(last)) || !GetChatDate(&tmLast, last) || tmLast < tmToRead) {
-					// 閉じる
-					readLogfile_.Close();
-				} else {
-					// まず2分探索
-					for (LONGLONG scale = 2; ; scale *= 2) {
-						char (&middle)[CHAT_TAG_MAX] = readLogText_[!bReadLogTextNext_];
-						int sign = 0;
-						for (;;) {
-							if (!readLogfile_.ReadLine(middle, _countof(middle))) {
-								break;
-							}
-							unsigned int tmMiddle;
-							if (GetChatDate(&tmMiddle, middle)) {
-								sign = tmMiddle + 10 > tmToRead ? -1 : 1;
-								break;
-							}
-						}
-						// 行の時刻が得られないか最初の行がすでに未来ならリセット
-						if (sign == 0 || sign < 0 && scale == 2) {
-							readLogfile_.ResetPointer();
-							break;
-						}
-						LONGLONG moveSize = readLogfile_.Seek(sign * scale);
-						dprintf(TEXT("CNicoJK::ReadFromLogfile() moveSize=%lld\n"), moveSize); // DEBUG
-						// 移動量が小さくなれば打ち切り
-						if (-32 * 1024 < moveSize && moveSize < 32 * 1024) {
-							// tmToReadよりも確実に過去になる位置まで戻す
-							readLogfile_.Seek(-scale);
-							// シーク直後の中途半端な1行を読み飛ばす
-							readLogfile_.ReadLine(middle, 1);
-							break;
-						}
-						readLogfile_.ReadLine(middle, 1);
-					}
-				}
-			}
-		}
-		// テキスト形式のログがなければアーカイブされたログを探す
-		if (!readLogfile_.IsOpen() && latestZip[0]) {
-			TCHAR pattern[64];
-			_stprintf_s(pattern, TEXT("\\jk%d\\%s"), jkID, latestZip);
-			path = s_.logfileFolder + pattern;
-			bool bSameResult;
-			zippedName = FindZippedLogfile(findZippedLogfileCache_, bSameResult, path.c_str(),
-			                               tmToRead + (READ_LOG_FOLDER_INTERVAL / 1000 + 2));
-			if (zippedName) {
-				// 前回と同じ結果のとき、キャッシュした最終行の時刻があれば使う
-				if (!bSameResult || tmZippedLogfileCachedLast_ == 0 || tmZippedLogfileCachedLast_ > tmToRead) {
-					// 読む必要がある。シークはできない
-					dprintf(TEXT("OpenZippedFile()\n")); // DEBUG
-					readLogfile_.OpenZippedFile(path.c_str(), zippedName);
-					tmZippedLogfileCachedLast_ = 0;
-				}
-			}
-		}
-		if (readLogfile_.IsOpen()) {
-			// tmToReadより過去の行を読み飛ばす
-			char (&next)[CHAT_TAG_MAX] = readLogText_[bReadLogTextNext_];
-			unsigned int tm = 0;
-			for (;;) {
-				if (!readLogfile_.ReadLine(next, _countof(next))) {
-					// 閉じる
-					readLogfile_.Close();
-					if (zippedName) {
-						// 最終行の時刻をキャッシュする
-						tmZippedLogfileCachedLast_ = tm;
-						dprintf(TEXT("tmZippedLogfileCachedLast_=%u\n"), tm); // DEBUG
-					}
-					break;
-				} else if (GetChatDate(&tmReadLogText_, next)) {
-					if (tmReadLogText_ > tmToRead) { // >=はダメ
-						currentReadLogfileJK_ = jkID;
-
-						TCHAR log[256];
-						size_t lastSep = path.find_last_of(TEXT("/\\"));
-						_stprintf_s(log, TEXT("ログ\"jk%d\\%.63s%s%S\"の読み込みを開始しました。"),
-						            jkID, &path.c_str()[lastSep == tstring::npos ? 0 : lastSep + 1],
-						            zippedName ? TEXT(":") : TEXT(""), zippedName ? zippedName : "");
-						OutputMessageLog(log);
-						break;
-					}
-					tm = tmReadLogText_;
-				}
-			}
-		}
-	}
-	bool bRet = false;
-	// 開いてたら読み込む
-	if (currentReadLogfileJK_ >= 0) {
-		if (readLogText_[bReadLogTextNext_][0] && tmReadLogText_ <= tmToRead) {
-			*text = readLogText_[bReadLogTextNext_];
-			bReadLogTextNext_ = !bReadLogTextNext_;
-			readLogText_[bReadLogTextNext_][0] = '\0';
-			bRet = true;
-		}
-		char (&next)[CHAT_TAG_MAX] = readLogText_[bReadLogTextNext_];
-		if (!next[0]) {
-			for (;;) {
-				if (!readLogfile_.ReadLine(next, _countof(next))) {
-					// 閉じる
-					readLogfile_.Close();
-					readLogfileTick_ = tick;
-					currentReadLogfileJK_ = -1;
-					OutputMessageLog(TEXT("ログファイルの読み込みを終了しました。"));
-					break;
-				} else if (GetChatDate(&tmReadLogText_, next)) {
-					break;
-				}
-			}
-		}
-	}
-	return bRet;
+	return logReader_.Read(jkID, [this](LPCTSTR message) { OutputMessageLog(message); }, text, tmToRead);
 }
 
 static int GetWindowHeight(HWND hwnd)
@@ -1344,7 +1165,7 @@ bool CNicoJK::ProcessChatTag(const char *tag, bool bShow, int showDelay)
 	}
 	std::cmatch m, mm;
 	unsigned int tm;
-	if (std::regex_match(tag, m, reChat) && GetChatDate(&tm, tag)) {
+	if (std::regex_match(tag, m, reChat) && CLogReader::GetChatDate(&tm, tag)) {
 		TCHAR text[CHAT_TEXT_MAX];
 		int len = MultiByteToWideChar(CP_UTF8, 0, m[2].first, static_cast<int>(m[2].length()), text, _countof(text) - 1);
 		text[len] = TEXT('\0');
@@ -1832,7 +1653,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			currentJKToGet_ = -1;
 			lastPostComm_[0] = TEXT('\0');
 			bUsingLogfileDriver_ = IsMatchDriverName(s_.logfileDrivers.c_str());
-			readLogfileTick_ = GetTickCount();
+			logReader_.ResetCheckInterval();
 			bSpecFile_ = false;
 			dropFileTimeout_ = 0;
 			SendMessage(hwnd, WM_RESET_STREAM, 0, 0);
@@ -2109,7 +1930,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					    FileOpenDialog(hwnd, TEXT("実況ログ(*.jkl;*.xml)\0*.jkl;*.xml\0すべてのファイル\0*.*\0"), path, _countof(path)) &&
 					    !bSpecFile_ && ImportLogfile(path, tmpSpecFileName_.c_str(), bRel ? FileTimeToUnixTime(llft) + 2 : 0))
 					{
-						readLogfileTick_ = GetTickCount();
+						logReader_.ResetCheckInterval();
 						bSpecFile_ = true;
 					}
 				}
@@ -2327,7 +2148,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					const char *text;
 					LONGLONG tm = FileTimeToUnixTime(llft);
 					tm = min(max(forwardOffset_ < 0 ? tm - (-forwardOffset_ / 1000) : tm + forwardOffset_ / 1000, 0LL), UINT_MAX - 3600LL);
-					while (ReadFromLogfile(bSpecFile_ ? 0 : currentJKToGet_, &text, static_cast<unsigned int>(tm))) {
+					while (ReadFromLogfile(bSpecFile_ ? 0 : bUsingLogfileDriver_ ? currentJKToGet_ : -1, &text, static_cast<unsigned int>(tm))) {
 						ProcessChatTag(text);
 						bRead = true;
 					}
@@ -2370,7 +2191,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				if (!bRel || (llft = GetCurrentTot()) >= 0) {
 					KillTimer(hwnd, TIMER_OPEN_DROPFILE);
 					if (ImportLogfile(dropFileName_.c_str(), tmpSpecFileName_.c_str(), bRel ? FileTimeToUnixTime(llft) + 2 : 0)) {
-						readLogfileTick_ = GetTickCount();
+						logReader_.ResetCheckInterval();
 						bSpecFile_ = true;
 						SendDlgItemMessage(hwnd, IDC_CHECK_SPECFILE, BM_SETCHECK, BST_CHECKED, 0);
 					}
@@ -2570,8 +2391,8 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 						break;
 					}
 					*itEnd = '\0';
-					if (itEnd - it >= CHAT_TAG_MAX) {
-						*(it + CHAT_TAG_MAX - 1) = '\0';
+					if (itEnd - it >= CLogReader::CHAT_TAG_MAX) {
+						*(it + CLogReader::CHAT_TAG_MAX - 1) = '\0';
 					}
 					const char *rpl = &*it;
 					if (!strncmp(rpl, "<chat ", 6)) {

@@ -7,16 +7,6 @@ typedef std::lock_guard<recursive_mutex_> lock_recursive_mutex;
 
 #define FILETIME_MILLISECOND 10000LL
 
-struct FIND_LOGFILE_ELEM {
-	char name[16];
-};
-
-struct FIND_LOGFILE_CACHE {
-	tstring path;
-	std::vector<FIND_LOGFILE_ELEM> list;
-	size_t index;
-};
-
 std::vector<TCHAR> GetPrivateProfileSectionBuffer(LPCTSTR lpAppName, LPCTSTR lpFileName);
 void GetBufferedProfileString(LPCTSTR lpBuff, LPCTSTR lpKeyName, LPCTSTR lpDefault, LPTSTR lpReturnedString, DWORD nSize);
 tstring GetBufferedProfileToString(LPCTSTR lpBuff, LPCTSTR lpKeyName, LPCTSTR lpDefault);
@@ -26,12 +16,10 @@ DWORD GetLongModuleFileName(HMODULE hModule, LPTSTR lpFileName, DWORD nSize);
 bool HasToken(const char *str, const char *substr);
 void DecodeEntityReference(TCHAR *str);
 COLORREF GetColor(const char *command);
-bool GetChatDate(unsigned int *tm, const char *tag);
 LONGLONG UnixTimeToFileTime(unsigned int tm);
 unsigned int FileTimeToUnixTime(LONGLONG ll);
 LONGLONG AribToFileTime(const BYTE *pData);
 BOOL FileOpenDialog(HWND hwndOwner, LPCTSTR lpstrFilter, LPTSTR lpstrFile, DWORD nMaxFile);
-const char *FindZippedLogfile(FIND_LOGFILE_CACHE &cache, bool &bSameResult, LPCTSTR zipPath, unsigned int tmToRead);
 bool GetProcessOutput(LPCTSTR commandLine, LPCTSTR currentDir, char *buf, size_t bufSize, int timeout = INT_MAX);
 std::string UnprotectDpapiToString(const char *src);
 std::string UnprotectV10ToString(const char *src, const char *v10Key, char *buf, size_t bufSize);
