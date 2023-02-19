@@ -1,0 +1,147 @@
+﻿#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <stdio.h>
+#include <tchar.h>
+#include "../LogReader.h"
+#include "../NetworkServiceIDTable.h"
+#include <algorithm>
+#include <string>
+
+int _tmain(int argc, TCHAR **argv)
+{
+	int readRatePerMille = 0;
+	int jkID = 0;
+	unsigned int tmReadFrom = 0;
+	unsigned int tmReadTo = 0;
+
+	if (argc < 4) {
+		_ftprintf(stderr, TEXT("Usage: jkrdlog [-r readrate] jkid_or_ns{nid<<16+sid} from_unixtime to_unixtime_or_0.\n"));
+		return 2;
+	}
+	for (int i = 1; i < argc; ++i) {
+		TCHAR c = TEXT('\0');
+		if (argv[i][0] == TEXT('-') && argv[i][1] && !argv[i][2]) {
+			c = argv[i][1];
+		}
+		bool bInvalid = false;
+		if (i < argc - 3) {
+			if (c == 'r') {
+				double percent = _tcstod(argv[++i], nullptr);
+				bInvalid = !(0 <= percent && percent <= 1000);
+				if (!bInvalid) {
+					readRatePerMille = static_cast<int>(percent * 10);
+				}
+			}
+		} else if (i == argc - 3) {
+			if (argv[i][0] == TEXT('n') && argv[i][1] == TEXT('s')) {
+				NETWORK_SERVICE_ID_ELEM e;
+				e.ntsID = _tcstoul(argv[i] + 2, nullptr, 10);
+				// 上位と下位をひっくり返しているので補正
+				e.ntsID = (e.ntsID << 16) | (e.ntsID >> 16);
+				const NETWORK_SERVICE_ID_ELEM *p = std::lower_bound(DEFAULT_NTSID_TABLE, DEFAULT_NTSID_TABLE + _countof(DEFAULT_NTSID_TABLE), e,
+					[](const NETWORK_SERVICE_ID_ELEM &a, const NETWORK_SERVICE_ID_ELEM &b) { return a.ntsID < b.ntsID; });
+				if (p != DEFAULT_NTSID_TABLE + _countof(DEFAULT_NTSID_TABLE) && p->ntsID == e.ntsID) {
+					jkID = p->jkID;
+				}
+			} else if (argv[i][0] == TEXT('j') && argv[i][1] == TEXT('k')) {
+				jkID = _tcstol(argv[i] + 2, nullptr, 10);
+			}
+			bInvalid = jkID <= 0;
+		} else if (i == argc - 2) {
+			tmReadFrom = _tcstoul(argv[i], nullptr, 10);
+		} else {
+			tmReadTo = _tcstoul(argv[i], nullptr, 10);
+		}
+		if (bInvalid) {
+			_ftprintf(stderr, TEXT("Error: Argument %d is invalid.\n"), i);
+			return 1;
+		}
+	}
+	if (jkID <= 0) {
+		_ftprintf(stderr, TEXT("Error: Not enough arguments.\n"));
+		return 1;
+	}
+
+	TCHAR dir[MAX_PATH];
+	DWORD nRet = GetModuleFileName(nullptr, dir, _countof(dir));
+	if (nRet && nRet < _countof(dir)) {
+		for (size_t i = _tcslen(dir); i > 0 && !_tcschr(TEXT("/\\"), dir[i - 1]); ) {
+			dir[--i] = TEXT('\0');
+		}
+		if (dir[0]) {
+			dir[_tcslen(dir) - 1] = TEXT('\0');
+		}
+	} else {
+		dir[0] = TEXT('\0');
+	}
+	if (!dir[0] || setvbuf(stdout, nullptr, _IONBF, 0) != 0) {
+		_ftprintf(stderr, TEXT("Error: Unexpected.\n"));
+		return 1;
+	}
+
+	CLogReader logReader;
+	logReader.SetLogDirectory(dir);
+	logReader.ResetCheckInterval();
+
+	LARGE_INTEGER liFreq = {};
+	LARGE_INTEGER liBase = {};
+	if (readRatePerMille > 0) {
+		if (!QueryPerformanceFrequency(&liFreq) || !QueryPerformanceCounter(&liBase)) {
+			_ftprintf(stderr, TEXT("Error: Unexpected.\n"));
+			return 1;
+		}
+		liFreq.QuadPart *= 1000;
+	}
+	std::string buf;
+	int n = 0;
+	for (unsigned int tm = tmReadFrom - 1; tmReadTo == 0 || tm < tmReadTo; ++tm) {
+		// 秒ごとにまとめて出力
+		const char *text;
+		while (logReader.Read(jkID, [&buf, &n](LPCTSTR message) {
+			char utf8[512];
+			if (WideCharToMultiByte(CP_UTF8, 0, message, -1, utf8, sizeof(utf8), nullptr, nullptr) != 0) {
+				buf += "<!-- M=";
+				buf += utf8;
+				buf += " -->\n";
+				++n;
+			}
+		}, &text, tm)) {
+			if (tm + 1 != tmReadFrom) {
+				buf += text;
+				buf += '\n';
+				++n;
+			}
+		}
+		if (tm + 1 == tmReadFrom) {
+			// 1秒だけ手前から読むため
+			continue;
+		}
+		// 80文字のヘッダをつける
+		char head[81];
+		int i = sprintf_s(head, "<!-- J=%d;T=%u;L=%d;N=%d", jkID, tm, static_cast<int>(buf.size()), n);
+		for (; i < 76; ++i) {
+			strcpy_s(head + i, sizeof(head) - i, " ");
+		}
+		strcpy_s(head + i, sizeof(head) - i, "-->\n");
+		buf.insert(0, head);
+		if (fputs(buf.c_str(), stdout) < 0) {
+			break;
+		}
+		buf.clear();
+		n = 0;
+		if (readRatePerMille > 0) {
+			for (;;) {
+				LARGE_INTEGER liNow;
+				if (!QueryPerformanceCounter(&liNow)) {
+					_ftprintf(stderr, TEXT("Error: Unexpected.\n"));
+					return 1;
+				}
+				if ((tm - tmReadFrom) - (liNow.QuadPart - liBase.QuadPart) * readRatePerMille / liFreq.QuadPart < 0) {
+					break;
+				}
+				Sleep(100);
+			}
+		}
+	}
+	return 0;
+}

@@ -1,0 +1,102 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="ソース ファイル">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="ヘッダー ファイル">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="リソース ファイル">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="ソース ファイル\zlib1">
+      <UniqueIdentifier>{8302c609-db81-4b8e-b074-524b33487d4c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\zlib1">
+      <UniqueIdentifier>{4a1c9d24-3f17-457f-b416-e00c0ddf8f42}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="jkrdlog.cpp">
+      <Filter>ソース ファイル</Filter>
+    </ClCompile>
+    <ClCompile Include="..\TextFileReader.cpp">
+      <Filter>ソース ファイル</Filter>
+    </ClCompile>
+    <ClCompile Include="..\zlib1\inftrees.c">
+      <Filter>ソース ファイル\zlib1</Filter>
+    </ClCompile>
+    <ClCompile Include="..\zlib1\ioapi.c">
+      <Filter>ソース ファイル\zlib1</Filter>
+    </ClCompile>
+    <ClCompile Include="..\zlib1\unzip.c">
+      <Filter>ソース ファイル\zlib1</Filter>
+    </ClCompile>
+    <ClCompile Include="..\zlib1\zutil.c">
+      <Filter>ソース ファイル\zlib1</Filter>
+    </ClCompile>
+    <ClCompile Include="..\zlib1\adler32.c">
+      <Filter>ソース ファイル\zlib1</Filter>
+    </ClCompile>
+    <ClCompile Include="..\zlib1\crc32.c">
+      <Filter>ソース ファイル\zlib1</Filter>
+    </ClCompile>
+    <ClCompile Include="..\zlib1\inffast.c">
+      <Filter>ソース ファイル\zlib1</Filter>
+    </ClCompile>
+    <ClCompile Include="..\zlib1\inflate.c">
+      <Filter>ソース ファイル\zlib1</Filter>
+    </ClCompile>
+    <ClCompile Include="..\LogReader.cpp">
+      <Filter>ソース ファイル</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\TextFileReader.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="..\zlib1\inffixed.h">
+      <Filter>ヘッダー ファイル\zlib1</Filter>
+    </ClInclude>
+    <ClInclude Include="..\zlib1\inflate.h">
+      <Filter>ヘッダー ファイル\zlib1</Filter>
+    </ClInclude>
+    <ClInclude Include="..\zlib1\inftrees.h">
+      <Filter>ヘッダー ファイル\zlib1</Filter>
+    </ClInclude>
+    <ClInclude Include="..\zlib1\ioapi.h">
+      <Filter>ヘッダー ファイル\zlib1</Filter>
+    </ClInclude>
+    <ClInclude Include="..\zlib1\unzip.h">
+      <Filter>ヘッダー ファイル\zlib1</Filter>
+    </ClInclude>
+    <ClInclude Include="..\zlib1\zconf.h">
+      <Filter>ヘッダー ファイル\zlib1</Filter>
+    </ClInclude>
+    <ClInclude Include="..\zlib1\zlib.h">
+      <Filter>ヘッダー ファイル\zlib1</Filter>
+    </ClInclude>
+    <ClInclude Include="..\zlib1\zutil.h">
+      <Filter>ヘッダー ファイル\zlib1</Filter>
+    </ClInclude>
+    <ClInclude Include="..\zlib1\crc32.h">
+      <Filter>ヘッダー ファイル\zlib1</Filter>
+    </ClInclude>
+    <ClInclude Include="..\zlib1\gzguts.h">
+      <Filter>ヘッダー ファイル\zlib1</Filter>
+    </ClInclude>
+    <ClInclude Include="..\zlib1\inffast.h">
+      <Filter>ヘッダー ファイル\zlib1</Filter>
+    </ClInclude>
+    <ClInclude Include="..\LogReader.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="..\NetworkServiceIDTable.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

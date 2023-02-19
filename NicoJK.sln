@@ -7,6 +7,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NicoJK", "NicoJK.vcxproj", 
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "jkimlog", "jkimlog\jkimlog.vcxproj", "{F0BBCF8E-0DCE-4B25-BEF2-C29C8DCA25DE}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "jkrdlog", "jkrdlog\jkrdlog.vcxproj", "{14DFA2BA-2841-4FFB-930F-22E5665A6FEC}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -31,6 +33,14 @@ Global
 		{F0BBCF8E-0DCE-4B25-BEF2-C29C8DCA25DE}.Release|Win32.Build.0 = Release|Win32
 		{F0BBCF8E-0DCE-4B25-BEF2-C29C8DCA25DE}.Release|x64.ActiveCfg = Release|x64
 		{F0BBCF8E-0DCE-4B25-BEF2-C29C8DCA25DE}.Release|x64.Build.0 = Release|x64
+		{14DFA2BA-2841-4FFB-930F-22E5665A6FEC}.Debug|Win32.ActiveCfg = Debug|Win32
+		{14DFA2BA-2841-4FFB-930F-22E5665A6FEC}.Debug|Win32.Build.0 = Debug|Win32
+		{14DFA2BA-2841-4FFB-930F-22E5665A6FEC}.Debug|x64.ActiveCfg = Debug|x64
+		{14DFA2BA-2841-4FFB-930F-22E5665A6FEC}.Debug|x64.Build.0 = Debug|x64
+		{14DFA2BA-2841-4FFB-930F-22E5665A6FEC}.Release|Win32.ActiveCfg = Release|Win32
+		{14DFA2BA-2841-4FFB-930F-22E5665A6FEC}.Release|Win32.Build.0 = Release|Win32
+		{14DFA2BA-2841-4FFB-930F-22E5665A6FEC}.Release|x64.ActiveCfg = Release|x64
+		{14DFA2BA-2841-4FFB-930F-22E5665A6FEC}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
