@@ -1,7 +1,7 @@
 ﻿#include "stdafx.h"
 #include "Util.h"
+#include "TextFileReader.h"
 #include "unzip.h"
-#include "iowin32.h"
 #include <commdlg.h>
 #include <wincrypt.h>
 #pragma comment(lib, "crypt32.lib")
@@ -246,7 +246,8 @@ const char *FindZippedLogfile(FIND_LOGFILE_CACHE &cache, bool &bSameResult, LPCT
 		cache.path = zipPath;
 		cache.list.clear();
 		zlib_filefunc64_def def;
-		fill_win32_filefunc64(&def);
+		fill_fopen64_filefunc(&def);
+		def.zopen64_file = CTextFileReader::TfopenSFileFuncForZlib;
 		unzFile f = unzOpen2_64(zipPath, &def);
 		if (f) {
 			if (unzGoToFirstFile(f) == UNZ_OK) {

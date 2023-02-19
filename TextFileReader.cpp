@@ -1,10 +1,13 @@
-﻿#include "stdafx.h"
+﻿#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <tchar.h>
 #include "TextFileReader.h"
 #include "unzip.h"
-#include "iowin32.h"
 #include <fcntl.h>
 #include <io.h>
 #include <share.h>
+#include <algorithm>
 
 CTextFileReader::CTextFileReader()
 	: fp_(nullptr, fclose)
@@ -37,7 +40,8 @@ bool CTextFileReader::OpenZippedFile(LPCTSTR zipPath, const char *fileName)
 {
 	Close();
 	zlib_filefunc64_def def;
-	fill_win32_filefunc64(&def);
+	fill_fopen64_filefunc(&def);
+	def.zopen64_file = TfopenSFileFuncForZlib;
 	zipf_.reset(unzOpen2_64(zipPath, &def));
 	if (zipf_) {
 		if (unzLocateFile(zipf_.get(), fileName, 0) == UNZ_OK && unzOpenCurrentFile(zipf_.get()) == UNZ_OK) {
@@ -103,7 +107,7 @@ size_t CTextFileReader::ReadLine(char *text, size_t textMax)
 			return 0;
 		}
 		size_t lineLen = strcspn(buf_, "\n");
-		size_t copyNum = min(lineLen, textMax - textLen - 1);
+		size_t copyNum = std::min(lineLen, textMax - textLen - 1);
 		strncpy_s(text + textLen, textMax - textLen, buf_, copyNum);
 		textLen += copyNum;
 		if (lineLen < BUF_SIZE - 1) {
@@ -129,7 +133,7 @@ size_t CTextFileReader::ReadLastLine(char *text, size_t textMax)
 	}
 	// バイナリモードでのSEEK_ENDは厳密には議論あるが、Windowsでは問題ない
 	if (_fseeki64(fp_.get(), 0, SEEK_END) != 0 ||
-	    _fseeki64(fp_.get(), -min<LONGLONG>(textMax - 1, _ftelli64(fp_.get())), SEEK_END) != 0) {
+	    _fseeki64(fp_.get(), -std::min<LONGLONG>(textMax - 1, _ftelli64(fp_.get())), SEEK_END) != 0) {
 		ResetPointer();
 		return 0;
 	}
@@ -171,7 +175,7 @@ LONGLONG CTextFileReader::Seek(LONGLONG scale)
 	}
 	LONGLONG fileSize = _ftelli64(fp_.get());
 	LONGLONG nextPos = fileSize / (scale < 0 ? -scale : scale) * (scale < 0 ? -1 : 1) + filePos;
-	nextPos = min(max<LONGLONG>(nextPos, 0), fileSize);
+	nextPos = std::min(std::max<LONGLONG>(nextPos, 0), fileSize);
 	if (_fseeki64(fp_.get(), nextPos, SEEK_SET) != 0) {
 		_fseeki64(fp_.get(), filePos, SEEK_SET);
 		return 0;
@@ -179,4 +183,18 @@ LONGLONG CTextFileReader::Seek(LONGLONG scale)
 	bEof_ = false;
 	buf_[0] = '\0';
 	return nextPos - filePos;
+}
+
+// zlib_filefunc64_def構造体のzopen64_file関数のTCHAR版
+void *CTextFileReader::TfopenSFileFuncForZlib(void *opaque, const void *filename, int mode)
+{
+	static_cast<void>(opaque);
+	LPCTSTR tmode = (mode & ZLIB_FILEFUNC_MODE_READWRITEFILTER) == ZLIB_FILEFUNC_MODE_READ ? TEXT("rbN") :
+	                (mode & ZLIB_FILEFUNC_MODE_EXISTING) != 0 ? TEXT("r+bN") :
+	                (mode & ZLIB_FILEFUNC_MODE_CREATE) != 0 ? TEXT("wbN") : nullptr;
+	FILE *fp;
+	if (filename && tmode && _tfopen_s(&fp, static_cast<LPCTSTR>(filename), tmode) == 0) {
+		return fp;
+	}
+	return nullptr;
 }
