@@ -24,11 +24,12 @@ void EnumFindFile(LPCTSTR pattern, P enumProc)
 
 CLogReader::CLogReader()
 	: currentJKID_(-1)
-	, tmZippedLogfileCachedLast_(0)
+	, bLatestLogfile_(false)
 	, bReadLogTextNext_(false)
 	, tmReadLogText_(0)
 	, checkInterval_(1000)
 	, checkTick_(0)
+	, tmZippedLogfileCachedLast_(0)
 {
 	readLogText_[0][0] = '\0';
 	readLogText_[1][0] = '\0';
@@ -67,7 +68,7 @@ bool CLogReader::Read(int jkID, const std::function<void(LPCTSTR)> &onMessage, c
 		checkTick_ = tick;
 		currentJKID_ = -1;
 		if (onMessage) {
-			onMessage(TEXT("ログファイルの読み込みを終了しました。"));
+			onMessage(TEXT("Closed logfile."));
 		}
 	}
 	if (!((tick - checkTick_) & 0x80000000) && currentJKID_ < 0 && jkID >= 0) {
@@ -79,6 +80,7 @@ bool CLogReader::Read(int jkID, const std::function<void(LPCTSTR)> &onMessage, c
 		if (jkID == 0) {
 			// 指定ファイル再生
 			path = jk0LogfilePath_;
+			bLatestLogfile_ = false;
 		} else {
 			// jkIDのログファイル一覧を得る
 			TCHAR pattern[64];
@@ -86,28 +88,32 @@ bool CLogReader::Read(int jkID, const std::function<void(LPCTSTR)> &onMessage, c
 			// tmToRead以前でもっとも新しいログファイルを探す
 			TCHAR target[16];
 			_stprintf_s(target, TEXT("%010u."), tmToRead + (checkInterval_ / 1000 + 2));
-			TCHAR latestTxt[16] = {};
+			TCHAR latestBeforeTarget[16] = {};
+			bLatestLogfile_ = true;
 			EnumFindFile((logDirectory_ + pattern).c_str(), [&](const WIN32_FIND_DATA &fd) {
-				if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 &&
-				    _tcscmp(fd.cFileName, target) < 0 &&
-				    _tcslen(fd.cFileName) == 14) {
+				if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 && _tcslen(fd.cFileName) == 14) {
+					bool bBeforeTarget = _tcscmp(fd.cFileName, target) < 0;
 					if (!_tcsicmp(fd.cFileName + 10, TEXT(".txt"))) {
 						// テキスト形式のログ
-						if (_tcscmp(fd.cFileName, latestTxt) > 0) {
-							_tcscpy_s(latestTxt, fd.cFileName);
+						if (!bBeforeTarget) {
+							bLatestLogfile_ = false;
+						} else if (_tcscmp(fd.cFileName, latestBeforeTarget) > 0) {
+							_tcscpy_s(latestBeforeTarget, fd.cFileName);
 						}
 					} else if (!_tcsicmp(fd.cFileName + 10, TEXT(".zip"))) {
 						// アーカイブされたログ
-						if (_tcscmp(fd.cFileName, latestZip) > 0) {
+						if (bBeforeTarget && _tcscmp(fd.cFileName, latestZip) > 0) {
 							_tcscpy_s(latestZip, fd.cFileName);
 						}
 					}
 				}
 			});
-			if (latestTxt[0]) {
+			if (latestBeforeTarget[0]) {
 				// 見つかった
-				_stprintf_s(pattern, TEXT("\\jk%d\\%s"), jkID, latestTxt);
+				_stprintf_s(pattern, TEXT("\\jk%d\\%s"), jkID, latestBeforeTarget);
 				path = logDirectory_ + pattern;
+			} else {
+				bLatestLogfile_ = false;
 			}
 		}
 
@@ -205,7 +211,7 @@ bool CLogReader::Read(int jkID, const std::function<void(LPCTSTR)> &onMessage, c
 						if (onMessage) {
 							TCHAR log[256];
 							size_t lastSep = path.find_last_of(TEXT("/\\"));
-							_stprintf_s(log, TEXT("ログ\"jk%d\\%.63s%s%S\"の読み込みを開始しました。"),
+							_stprintf_s(log, TEXT("Started reading logfile: jk%d\\%.63s%s%S"),
 							            jkID, &path.c_str()[lastSep == std::basic_string<TCHAR>::npos ? 0 : lastSep + 1],
 							            zippedName ? TEXT(":") : TEXT(""), zippedName ? zippedName : "");
 							onMessage(log);
@@ -235,7 +241,7 @@ bool CLogReader::Read(int jkID, const std::function<void(LPCTSTR)> &onMessage, c
 					checkTick_ = tick;
 					currentJKID_ = -1;
 					if (onMessage) {
-						onMessage(TEXT("ログファイルの読み込みを終了しました。"));
+						onMessage(TEXT("Closed logfile."));
 					}
 					break;
 				} else if (GetChatDate(&tmReadLogText_, next)) {

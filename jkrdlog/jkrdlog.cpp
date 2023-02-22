@@ -93,42 +93,56 @@ int _tmain(int argc, TCHAR **argv)
 		liFreq.QuadPart *= 1000;
 	}
 	std::string buf;
-	int n = 0;
-	for (unsigned int tm = tmReadFrom - 1; tmReadTo == 0 || tm < tmReadTo; ++tm) {
+	std::string textBuf;
+	bool bSkip = true;
+	bool bRetry = false;
+	unsigned int tmReading = tmReadFrom - 1;
+	for (unsigned int tm = tmReadFrom; tmReadTo == 0 || tm < tmReadTo; ++tm) {
 		// 秒ごとにまとめて出力
-		const char *text;
-		while (logReader.Read(jkID, [&buf, &n](LPCTSTR message) {
-			char utf8[512];
-			if (WideCharToMultiByte(CP_UTF8, 0, message, -1, utf8, sizeof(utf8), nullptr, nullptr) != 0) {
-				buf += "<!-- M=";
-				buf += utf8;
-				buf += " -->\n";
-				++n;
+		buf.assign(76, ' ');
+		buf += "-->\n";
+		for (; tmReading <= tm; ++tmReading) {
+			textBuf.clear();
+			const char *text;
+			while (logReader.Read(jkID, [&buf, &textBuf](LPCTSTR message) {
+				char utf8[512];
+				if (WideCharToMultiByte(CP_UTF8, 0, message, -1, utf8, sizeof(utf8), nullptr, nullptr) != 0) {
+					buf += "<!-- M=";
+					buf += utf8;
+					buf += " -->\n";
+				}
+			}, &text, tmReading)) {
+				textBuf += text;
+				textBuf += '\n';
+				if (!logReader.IsOpen()) {
+					// 次の読み込みは確実に失敗するので省略
+					break;
+				}
 			}
-		}, &text, tm)) {
-			if (tm + 1 != tmReadFrom) {
-				buf += text;
-				buf += '\n';
-				++n;
+			if (bSkip) {
+				// 1秒だけ手前から読むため
+				bSkip = false;
+				continue;
 			}
-		}
-		if (tm + 1 == tmReadFrom) {
-			// 1秒だけ手前から読むため
-			continue;
+			if (!bRetry && !textBuf.empty() && !logReader.IsOpen() && logReader.IsLatestLogfile()) {
+				// もっとも新しいログファイルなので追記されるかもしれない
+				// この時刻のログは追記中に読み込まれて不完全かもしれないのでリトライする
+				bSkip = true;
+				bRetry = true;
+				--tmReading;
+				break;
+			}
+			bRetry = false;
+			buf += textBuf;
 		}
 		// 80文字のヘッダをつける
-		char head[81];
-		int i = sprintf_s(head, "<!-- J=%d;T=%u;L=%d;N=%d", jkID, tm, static_cast<int>(buf.size()), n);
-		for (; i < 76; ++i) {
-			strcpy_s(head + i, sizeof(head) - i, " ");
-		}
-		strcpy_s(head + i, sizeof(head) - i, "-->\n");
-		buf.insert(0, head);
+		char head[77];
+		int i = sprintf_s(head, "<!-- J=%d;T=%u;L=%d;N=%d", jkID, tm, static_cast<int>(buf.size()) - 80,
+		                  static_cast<int>(std::count(buf.begin(), buf.end(), '\n')) - 1);
+		buf.replace(0, i, head);
 		if (fputs(buf.c_str(), stdout) < 0) {
 			break;
 		}
-		buf.clear();
-		n = 0;
 		if (readRatePerMille > 0) {
 			for (;;) {
 				LARGE_INTEGER liNow;

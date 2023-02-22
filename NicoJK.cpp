@@ -878,7 +878,18 @@ static inline int CounterDiff(DWORD a, DWORD b)
 
 bool CNicoJK::ReadFromLogfile(int jkID, const char **text, unsigned int tmToRead)
 {
-	return logReader_.Read(jkID, [this](LPCTSTR message) { OutputMessageLog(message); }, text, tmToRead);
+	return logReader_.Read(jkID, [this](LPCTSTR message) {
+		static const TCHAR started[] = TEXT("Started reading logfile: ");
+		if (!_tcsncmp(message, started, _tcslen(started))) {
+			TCHAR log[256];
+			_stprintf_s(log, TEXT("ログ\"%.191s\"の読み込みを開始しました。"), message + _tcslen(started));
+			OutputMessageLog(log);
+		} else if (!_tcscmp(message, TEXT("Closed logfile."))) {
+			OutputMessageLog(TEXT("ログファイルの読み込みを終了しました。"));
+		} else {
+			OutputMessageLog(message);
+		}
+	}, text, tmToRead);
 }
 
 static int GetWindowHeight(HWND hwnd)
@@ -2151,6 +2162,10 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					while (ReadFromLogfile(bSpecFile_ ? 0 : bUsingLogfileDriver_ ? currentJKToGet_ : -1, &text, static_cast<unsigned int>(tm))) {
 						ProcessChatTag(text);
 						bRead = true;
+						if (!logReader_.IsOpen()) {
+							// 次の読み込みは確実に失敗するので省略
+							break;
+						}
 					}
 					if (bRead) {
 						// date属性値は秒精度しかないのでコメント表示が団子にならないよう適当にごまかす

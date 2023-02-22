@@ -17,6 +17,8 @@ public:
 	void SetJK0LogfilePath(LPCTSTR path);
 	void SetCheckIntervalMsec(DWORD checkInterval);
 	void ResetCheckInterval();
+	bool IsOpen() const { return currentJKID_ >= 0; }
+	bool IsLatestLogfile() const { return bLatestLogfile_; }
 	// 指定した実況IDの指定時刻のログ1行を読み込む
 	// jkIDが負値のときはログファイルを閉じる
 	// jkID==0は指定ファイル再生(JK0Logfile)を表す特殊な実況IDとする
@@ -37,6 +39,7 @@ private:
 
 	int currentJKID_;
 	CTextFileReader readLogfile_;
+	bool bLatestLogfile_;
 	char readLogText_[2][CHAT_TAG_MAX];
 	bool bReadLogTextNext_;
 	unsigned int tmReadLogText_;
