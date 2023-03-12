@@ -167,6 +167,7 @@
     <ClInclude Include="JKStream.h" />
     <ClInclude Include="CommentWindow.h" />
     <ClInclude Include="JKIDNameTable.h" />
+    <ClInclude Include="JKTransfer.h" />
     <ClInclude Include="LogReader.h" />
     <ClInclude Include="NetworkServiceIDTable.h" />
     <ClInclude Include="NicoJK.h" />
@@ -202,6 +203,7 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="JKTransfer.cpp" />
     <ClCompile Include="LogReader.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>

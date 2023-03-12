@@ -7,6 +7,7 @@
 #include "ImportLogUtil.h"
 #include "Util.h"
 #include "JKStream.h"
+#include "JKTransfer.h"
 #include "LogReader.h"
 #include "CommentWindow.h"
 #define TVTEST_PLUGIN_CLASS_IMPLEMENT
@@ -39,6 +40,7 @@ inline void dprintf_real( const _TCHAR * fmt, ... )
 // 通信用
 #define WMS_FORCE (WM_APP + 101)
 #define WMS_JK (WM_APP + 102)
+#define WMS_TRANSFER (WM_APP + 103)
 
 #define WM_RESET_STREAM (WM_APP + 105)
 #define WM_UPDATE_LIST (WM_APP + 106)
@@ -437,6 +439,7 @@ void CNicoJK::LoadFromIni()
 	s_.bCommentFontAntiAlias = GetBufferedProfileInt(buf.data(), TEXT("commentFontAntiAlias"), 1) != 0;
 	s_.commentDuration		= GetBufferedProfileInt(buf.data(), TEXT("commentDuration"), CCommentWindow::DISPLAY_DURATION);
 	s_.commentDrawLineCount = GetBufferedProfileInt(buf.data(), TEXT("commentDrawLineCount"), CCommentWindow::DEFAULT_LINE_DRAW_COUNT);
+	s_.commentShareMode		= GetBufferedProfileInt(buf.data(), TEXT("commentShareMode"), 0);
 	s_.logfileMode			= GetBufferedProfileInt(buf.data(), TEXT("logfileMode"), 0);
 	s_.logfileDrivers		= GetBufferedProfileToString(buf.data(), TEXT("logfileDrivers"),
 							                             TEXT("BonDriver_UDP.dll:BonDriver_TCP.dll:BonDriver_File.dll:BonDriver_RecTask.dll:BonDriver_TsTask.dll:")
@@ -1731,6 +1734,13 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				SetTVTestPanelItem(GetDlgItem(hwnd, IDC_CHECK_SPECFILE), m_pApp, TVTestPanelButtonProc);
 				SetTVTestPanelItem(GetDlgItem(hwnd, IDC_CHECK_RELATIVE), m_pApp, TVTestPanelButtonProc);
 			}
+
+			if (s_.commentShareMode == 1 || s_.commentShareMode == 2) {
+				// 投稿機能は投稿欄を表示しているときだけ
+				if (!jkTransfer_.Open(hwnd, WMS_TRANSFER, s_.commentShareMode == 2 && cookie_[0])) {
+					m_pApp->AddLog(L"設定commentShareModeを有効にできませんでした。", TVTest::LOG_TYPE_WARNING);
+				}
+			}
 			return TRUE;
 		}
 		return FALSE;
@@ -1770,8 +1780,10 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 
 			channelStream_.BeginClose();
 			jkStream_.BeginClose();
+			jkTransfer_.BeginClose();
 			channelStream_.Close();
 			jkStream_.Close();
+			jkTransfer_.Close();
 			currentJK_ = -1;
 
 			if (syncThread_.joinable()) {
@@ -2385,7 +2397,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 		return TRUE;
 	case WMS_JK:
 		{
-			static const std::regex reChatResult("^<chat_result(?= )[^>]*? status=\"(?!0\")(\\d+)\"");
+			static const std::regex reChatResult("^<chat_result(?= )[^>]*? status=\"(\\d+)\"");
 			static const std::regex reXRoom("^<x_room ");
 			static const std::regex reNickname("^<x_room(?= )[^>]*? nickname=\"(.*?)\"");
 			static const std::regex reIsLoggedIn("^<x_room(?= )[^>]*? is_logged_in=\"1\"");
@@ -2415,16 +2427,21 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 						if (ProcessChatTag(rpl, !bSpecFile_, static_cast<int>(min(max(-forwardOffset_, 0LL), 30000LL)))) {
 							dprintf(TEXT("#")); // DEBUG
 							WriteToLogfile(currentJK_, rpl);
+							jkTransfer_.SendChat(currentJK_, rpl);
 							++currentJKChatCount_;
 							bRead = true;
 						}
 					} else {
 						std::cmatch m;
 						if (std::regex_search(rpl, m, reChatResult)) {
-							// コメント投稿失敗の応答を取得した
-							TCHAR text[64];
-							_stprintf_s(text, TEXT("Error:コメント投稿に失敗しました(status=%d)。"), strtol(m[1].first, nullptr, 10));
-							OutputMessageLog(text);
+							// コメント投稿の応答を取得した
+							int status = strtol(m[1].first, nullptr, 10);
+							if (status != 0) {
+								TCHAR text[64];
+								_stprintf_s(text, TEXT("Error:コメント投稿に失敗しました(status=%d)。"), status);
+								OutputMessageLog(text);
+							}
+							jkTransfer_.SendChat(currentJK_, rpl);
 						} else if (std::regex_search(rpl, reXRoom)) {
 							// 接続情報を取得した
 							TCHAR nickname[64];
@@ -2450,6 +2467,41 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				}
 				if (bRead && bDisplayLogList_) {
 					SendMessage(hwnd, WM_UPDATE_LIST, FALSE, 0);
+				}
+			}
+		}
+		return TRUE;
+	case WMS_TRANSFER:
+		{
+			std::string u8post = jkTransfer_.ProcessRecvPost();
+			size_t mailEndPos = u8post.find(']');
+			if (mailEndPos != std::string::npos && u8post[0] == '[') {
+				if (GetTickCount() - lastPostTick_ < POST_COMMENT_INTERVAL) {
+					OutputMessageLog(TEXT("Error:投稿間隔が短すぎます。"));
+					jkTransfer_.SendChat(currentJK_, "<!-- M=Post error! Short interval. -->");
+				} else if (u8post.size() - mailEndPos - 1 >= POST_COMMENT_MAX) {
+					OutputMessageLog(TEXT("Error:投稿コメントが長すぎます。"));
+					jkTransfer_.SendChat(currentJK_, "<!-- M=Post error! Too long. -->");
+				} else if (u8post.size() - mailEndPos - 1 > 0) {
+					TCHAR comm[POST_COMMENT_MAX + 1];
+					int len = MultiByteToWideChar(CP_UTF8, 0, u8post.c_str() + mailEndPos + 1, -1, comm, _countof(comm) - 1);
+					comm[len] = TEXT('\0');
+					if (!_tcscmp(comm, lastPostComm_)) {
+						OutputMessageLog(TEXT("Error:投稿コメントが前回と同じです。"));
+						jkTransfer_.SendChat(currentJK_, "<!-- M=Post error! Same as previous. -->");
+					} else {
+						if (s_.bAnonymity) {
+							u8post.insert(mailEndPos, " 184");
+						}
+						// コメント投稿
+						if (jkStream_.Send(hwnd, WMS_JK, '+', u8post.c_str())) {
+							lastPostTick_ = GetTickCount();
+							_tcscpy_s(lastPostComm_, comm);
+						} else {
+							OutputMessageLog(TEXT("Error:コメントサーバに接続していません。"));
+							jkTransfer_.SendChat(currentJK_, "<!-- M=Post error! Not connected. -->");
+						}
+					}
 				}
 			}
 		}

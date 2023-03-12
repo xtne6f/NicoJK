@@ -16,7 +16,7 @@ public:
 private:
 	bool CreateWorker(HWND hwnd, UINT msg);
 	static bool CreateJKProcess(HANDLE &hProcess, HANDLE &hAsyncReadPipe, HANDLE &hWritePipe);
-	void WorkerThread();
+	void WorkerThread(HWND hwnd, UINT msg);
 
 	recursive_mutex_ workerLock_;
 	std::thread workerThread_;
@@ -28,8 +28,6 @@ private:
 	bool bOpened_;
 	bool bShutdown_;
 	bool bShutdownSent_;
-	HWND hwnd_;
-	UINT msg_;
 	std::vector<char> sendBuf_;
 	std::vector<char> recvBuf_;
 };

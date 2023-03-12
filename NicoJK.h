@@ -49,6 +49,7 @@ private:
 		bool bCommentFontAntiAlias;
 		int commentDuration;
 		int commentDrawLineCount;
+		int commentShareMode;
 		int logfileMode;
 		tstring logfileDrivers;
 		tstring nonTunerDrivers;
@@ -166,6 +167,7 @@ private:
 	// 通信用
 	CJKStream channelStream_;
 	CJKStream jkStream_;
+	CJKTransfer jkTransfer_;
 	std::vector<char> channelBuf_;
 	std::vector<char> jkBuf_;
 	int currentJKToGet_;

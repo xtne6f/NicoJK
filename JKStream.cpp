@@ -50,12 +50,10 @@ bool CJKStream::CreateWorker(HWND hwnd, UINT msg)
 	}
 	hWorkerEvent_ = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 	if (hWorkerEvent_) {
-		workerThread_ = std::thread([this]() { WorkerThread(); });
+		workerThread_ = std::thread([this, hwnd, msg]() { WorkerThread(hwnd, msg); });
 		// 初期化を待つ
 		WaitForSingleObject(hWorkerEvent_, INFINITE);
 		if (bWorkerCreated_) {
-			hwnd_ = hwnd;
-			msg_ = msg;
 			lock_recursive_mutex lock(workerLock_);
 			bContinueWorker_ = true;
 			return true;
@@ -122,7 +120,7 @@ bool CJKStream::CreateJKProcess(HANDLE &hProcess, HANDLE &hAsyncReadPipe, HANDLE
 	return false;
 }
 
-void CJKStream::WorkerThread()
+void CJKStream::WorkerThread(HWND hwnd, UINT msg)
 {
 	HANDLE olEvents[] = {hWorkerEvent_, CreateEvent(nullptr, TRUE, TRUE, nullptr)};
 	if (!olEvents[1]) {
@@ -187,7 +185,7 @@ void CJKStream::WorkerThread()
 			// 非同期読み込み開始
 			if (bPost) {
 				// ウィンドウに受信を通知
-				PostMessage(hwnd_, msg_, 0, 0);
+				PostMessage(hwnd, msg, 0, 0);
 			}
 		} else {
 			lock_recursive_mutex lock(workerLock_);
