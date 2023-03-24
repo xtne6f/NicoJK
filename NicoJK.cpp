@@ -2479,14 +2479,14 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				if (GetTickCount() - lastPostTick_ < POST_COMMENT_INTERVAL) {
 					OutputMessageLog(TEXT("Error:投稿間隔が短すぎます。"));
 					jkTransfer_.SendChat(currentJK_, "<!-- M=Post error! Short interval. -->");
-				} else if (u8post.size() - mailEndPos - 1 >= POST_COMMENT_MAX) {
-					OutputMessageLog(TEXT("Error:投稿コメントが長すぎます。"));
-					jkTransfer_.SendChat(currentJK_, "<!-- M=Post error! Too long. -->");
 				} else if (u8post.size() - mailEndPos - 1 > 0) {
 					TCHAR comm[POST_COMMENT_MAX + 1];
 					int len = MultiByteToWideChar(CP_UTF8, 0, u8post.c_str() + mailEndPos + 1, -1, comm, _countof(comm) - 1);
 					comm[len] = TEXT('\0');
-					if (!_tcscmp(comm, lastPostComm_)) {
+					if (!comm[0]) {
+						OutputMessageLog(TEXT("Error:投稿コメントが長すぎます。"));
+						jkTransfer_.SendChat(currentJK_, "<!-- M=Post error! Too long. -->");
+					} else if (!_tcscmp(comm, lastPostComm_)) {
 						OutputMessageLog(TEXT("Error:投稿コメントが前回と同じです。"));
 						jkTransfer_.SendChat(currentJK_, "<!-- M=Post error! Same as previous. -->");
 					} else {
