@@ -49,8 +49,10 @@ int _tmain(int argc, TCHAR **argv)
 			bInvalid = jkID <= 0;
 		} else if (i == argc - 2) {
 			tmReadFrom = _tcstoul(argv[i], nullptr, 10);
+			bInvalid = tmReadFrom == 0;
 		} else {
 			tmReadTo = _tcstoul(argv[i], nullptr, 10);
+			bInvalid = (tmReadTo == 0 && readRatePerMille <= 0) || (tmReadTo != 0 && tmReadTo < tmReadFrom);
 		}
 		if (bInvalid) {
 			_ftprintf(stderr, TEXT("Error: Argument %d is invalid.\n"), i);
@@ -74,7 +76,7 @@ int _tmain(int argc, TCHAR **argv)
 	} else {
 		dir[0] = TEXT('\0');
 	}
-	if (!dir[0] || setvbuf(stdout, nullptr, _IONBF, 0) != 0) {
+	if (!dir[0]) {
 		_ftprintf(stderr, TEXT("Error: Unexpected.\n"));
 		return 1;
 	}
@@ -86,11 +88,17 @@ int _tmain(int argc, TCHAR **argv)
 	LARGE_INTEGER liFreq = {};
 	LARGE_INTEGER liBase = {};
 	if (readRatePerMille > 0) {
-		if (!QueryPerformanceFrequency(&liFreq) || !QueryPerformanceCounter(&liBase)) {
+		// 毎秒速やかに出力するためバッファリングしない
+		if (setvbuf(stdout, nullptr, _IONBF, 0) != 0 ||
+		    !QueryPerformanceFrequency(&liFreq) ||
+		    !QueryPerformanceCounter(&liBase)) {
 			_ftprintf(stderr, TEXT("Error: Unexpected.\n"));
 			return 1;
 		}
 		liFreq.QuadPart *= 1000;
+	} else {
+		// ウェイト無しなのでファイルチェックを間引かない
+		logReader.SetCheckIntervalMsec(0);
 	}
 	std::string buf;
 	std::string textBuf;
@@ -101,6 +109,7 @@ int _tmain(int argc, TCHAR **argv)
 		// 秒ごとにまとめて出力
 		buf.assign(76, ' ');
 		buf += "-->\n";
+		bool bFindNext = false;
 		for (; tmReading <= tm; ++tmReading) {
 			textBuf.clear();
 			const char *text;
@@ -124,7 +133,14 @@ int _tmain(int argc, TCHAR **argv)
 				bSkip = false;
 				continue;
 			}
-			if (!bRetry && !textBuf.empty() && !logReader.IsOpen() && logReader.IsLatestLogfile()) {
+			if (readRatePerMille <= 0) {
+				// ウェイト無しなのでファイルチェックを毎秒行うと高負荷になるため
+				if (!logReader.IsOpen()) {
+					bSkip = true;
+					bFindNext = true;
+					break;
+				}
+			} else if (!bRetry && !textBuf.empty() && !logReader.IsOpen() && logReader.IsLatestLogfile()) {
 				// もっとも新しいログファイルなので追記されるかもしれない
 				// この時刻のログは追記中に読み込まれて不完全かもしれないのでリトライする
 				bSkip = true;
@@ -143,6 +159,28 @@ int _tmain(int argc, TCHAR **argv)
 		if (fputs(buf.c_str(), stdout) < 0) {
 			break;
 		}
+		if (bFindNext) {
+			// 次に読み込める時刻まで飛ぶ
+			unsigned int tmJumpTo = logReader.FindNextReadableTime(jkID, tm + 1);
+			if (tmJumpTo == 0 || tmJumpTo > tmReadTo) {
+				tmJumpTo = tmReadTo;
+			}
+			bool bError = false;
+			for (++tm; tm < tmJumpTo; ++tm, ++tmReading) {
+				buf.assign(76, ' ');
+				buf += "-->\n";
+				i = sprintf_s(head, "<!-- J=%d;T=%u;L=0;N=0", jkID, tm);
+				buf.replace(0, i, head);
+				if (fputs(buf.c_str(), stdout) < 0) {
+					bError = true;
+					break;
+				}
+			}
+			if (bError) {
+				break;
+			}
+			--tm;
+		}
 		if (readRatePerMille > 0) {
 			for (;;) {
 				LARGE_INTEGER liNow;
@@ -157,5 +195,6 @@ int _tmain(int argc, TCHAR **argv)
 			}
 		}
 	}
+	fflush(stdout);
 	return 0;
 }

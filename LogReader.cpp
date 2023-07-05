@@ -76,7 +76,7 @@ bool CLogReader::Read(int jkID, const std::function<void(LPCTSTR)> &onMessage, c
 		checkTick_ = tick + checkInterval_;
 		std::basic_string<TCHAR> path;
 		const char *zippedName = nullptr;
-		TCHAR latestZip[16] = {};
+		TCHAR latestZipBeforeTarget[16] = {};
 		if (jkID == 0) {
 			// 指定ファイル再生
 			path = jk0LogfilePath_;
@@ -102,8 +102,8 @@ bool CLogReader::Read(int jkID, const std::function<void(LPCTSTR)> &onMessage, c
 						}
 					} else if (!_tcsicmp(fd.cFileName + 10, TEXT(".zip"))) {
 						// アーカイブされたログ
-						if (bBeforeTarget && _tcscmp(fd.cFileName, latestZip) > 0) {
-							_tcscpy_s(latestZip, fd.cFileName);
+						if (bBeforeTarget && _tcscmp(fd.cFileName, latestZipBeforeTarget) > 0) {
+							_tcscpy_s(latestZipBeforeTarget, fd.cFileName);
 						}
 					}
 				}
@@ -167,13 +167,13 @@ bool CLogReader::Read(int jkID, const std::function<void(LPCTSTR)> &onMessage, c
 			}
 		}
 		// テキスト形式のログがなければアーカイブされたログを探す
-		if (!readLogfile_.IsOpen() && latestZip[0]) {
+		if (!readLogfile_.IsOpen() && latestZipBeforeTarget[0]) {
 			TCHAR pattern[64];
-			_stprintf_s(pattern, TEXT("\\jk%d\\%s"), jkID, latestZip);
+			_stprintf_s(pattern, TEXT("\\jk%d\\%s"), jkID, latestZipBeforeTarget);
 			path = logDirectory_ + pattern;
 			bool bSameResult;
 			zippedName = FindZippedLogfile(findZippedLogfileCache_, bSameResult, path.c_str(),
-			                               tmToRead + (checkInterval_ / 1000 + 2));
+			                               tmToRead + (checkInterval_ / 1000 + 2), true);
 			if (zippedName) {
 				// 前回と同じ結果のとき、キャッシュした最終行の時刻があれば使う
 				if (!bSameResult || tmZippedLogfileCachedLast_ == 0 || tmZippedLogfileCachedLast_ > tmToRead) {
@@ -253,6 +253,64 @@ bool CLogReader::Read(int jkID, const std::function<void(LPCTSTR)> &onMessage, c
 	return bRet;
 }
 
+unsigned int CLogReader::FindNextReadableTime(int jkID, unsigned int tmToRead) const
+{
+	if (logDirectory_.empty()) {
+		return 0;
+	}
+	// jkIDのログファイル一覧を得る
+	TCHAR pattern[64];
+	_stprintf_s(pattern, TEXT("\\jk%d\\??????????.???"), jkID);
+	// tmToRead以後でもっとも古いログファイルを探す
+	TCHAR target[16];
+	_stprintf_s(target, TEXT("%010u."), tmToRead);
+	TCHAR oldestAfterTarget[16] = {};
+	TCHAR oldestZipAfterTarget[16] = {};
+	TCHAR latestZipBeforeTarget[16] = {};
+	EnumFindFile((logDirectory_ + pattern).c_str(), [&](const WIN32_FIND_DATA &fd) {
+		if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 && _tcslen(fd.cFileName) == 14) {
+			bool bBeforeTarget = _tcscmp(fd.cFileName, target) < 0;
+			if (!_tcsicmp(fd.cFileName + 10, TEXT(".txt"))) {
+				// テキスト形式のログ
+				if (!bBeforeTarget && (!oldestAfterTarget[0] || _tcscmp(fd.cFileName, oldestAfterTarget) < 0)) {
+					_tcscpy_s(oldestAfterTarget, fd.cFileName);
+				}
+			} else if (!_tcsicmp(fd.cFileName + 10, TEXT(".zip"))) {
+				// アーカイブされたログ
+				if (!bBeforeTarget && (!oldestZipAfterTarget[0] || _tcscmp(fd.cFileName, oldestZipAfterTarget) < 0)) {
+					_tcscpy_s(oldestZipAfterTarget, fd.cFileName);
+				} else if (bBeforeTarget && _tcscmp(fd.cFileName, latestZipBeforeTarget) > 0) {
+					_tcscpy_s(latestZipBeforeTarget, fd.cFileName);
+				}
+			}
+		}
+	});
+
+	// アーカイブのうちtmToRead以後でもっとも古いログファイルを探す
+	unsigned int tmZipped = 0;
+	if (latestZipBeforeTarget[0]) {
+		_stprintf_s(pattern, TEXT("\\jk%d\\%s"), jkID, latestZipBeforeTarget);
+		FIND_LOGFILE_CACHE cache;
+		bool bSameResult;
+		const char *zippedName = FindZippedLogfile(cache, bSameResult, (logDirectory_ + pattern).c_str(), tmToRead, false);
+		if (zippedName) {
+			tmZipped = strtoul(zippedName, nullptr, 10);
+		}
+	}
+	if (tmZipped == 0 && oldestZipAfterTarget[0]) {
+		tmZipped = _tcstoul(oldestZipAfterTarget, nullptr, 10);
+	}
+
+	unsigned int tm = tmZipped;
+	if (oldestAfterTarget[0]) {
+		tm = _tcstoul(oldestAfterTarget, nullptr, 10);
+		if (tmZipped != 0 && tm > tmZipped) {
+			tm = tmZipped;
+		}
+	}
+	return tm < tmToRead ? 0 : tm;
+}
+
 bool CLogReader::GetChatDate(unsigned int *tm, const char *tag)
 {
 	// TODO: dateは秒精度しかないので独自に属性値つけるかvposを解釈するとよりよいかも
@@ -265,7 +323,7 @@ bool CLogReader::GetChatDate(unsigned int *tm, const char *tag)
 	return false;
 }
 
-const char *CLogReader::FindZippedLogfile(FIND_LOGFILE_CACHE &cache, bool &bSameResult, LPCTSTR zipPath, unsigned int tmToRead)
+const char *CLogReader::FindZippedLogfile(FIND_LOGFILE_CACHE &cache, bool &bSameResult, LPCTSTR zipPath, unsigned int tm, bool bBeforeOrAfter)
 {
 	// アーカイブ内ファイルの列挙は比較的重いのでキャッシュする
 	if (_tcsicmp(zipPath, cache.path.c_str())) {
@@ -293,15 +351,15 @@ const char *CLogReader::FindZippedLogfile(FIND_LOGFILE_CACHE &cache, bool &bSame
 		cache.index = cache.list.size();
 	}
 
-	// tmToRead以前でもっとも新しいログファイルを探す
+	// tmより前/以後でもっとも新しい/古いログファイルを探す
 	char target[16];
-	sprintf_s(target, "%010u.", tmToRead);
+	sprintf_s(target, "%010u.", tm);
 	const char *name = nullptr;
 	size_t lastIndex = cache.index;
 	cache.index = cache.list.size();
 	for (size_t i = 0; i < cache.list.size(); ++i) {
-		if (strcmp(cache.list[i].name, target) < 0 &&
-		    (!name || strcmp(cache.list[i].name, name) > 0)) {
+		if ((strcmp(cache.list[i].name, target) < 0) == bBeforeOrAfter &&
+		    (!name || (strcmp(cache.list[i].name, name) > 0) == bBeforeOrAfter)) {
 			name = cache.list[i].name;
 			cache.index = i;
 		}

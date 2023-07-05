@@ -24,6 +24,9 @@ public:
 	// jkID==0は指定ファイル再生(JK0Logfile)を表す特殊な実況IDとする
 	// jkID>=0のときtextは必須。戻り値が真のとき*textは次にこのメソッドを呼ぶまで有効
 	bool Read(int jkID, const std::function<void(LPCTSTR)> &onMessage = nullptr, const char **text = nullptr, unsigned int tmToRead = 0);
+	// 次に読み込みが可能になる見込みの時刻を探す
+	// 失敗のときは0が返る
+	unsigned int FindNextReadableTime(int jkID, unsigned int tmToRead) const;
 	static bool GetChatDate(unsigned int *tm, const char *tag);
 private:
 	struct FIND_LOGFILE_ELEM {
@@ -34,8 +37,8 @@ private:
 		std::vector<FIND_LOGFILE_ELEM> list;
 		size_t index;
 	};
-	// tmToRead以前でもっとも新しいログファイルをアーカイブから探す
-	static const char *FindZippedLogfile(FIND_LOGFILE_CACHE &cache, bool &bSameResult, LPCTSTR zipPath, unsigned int tmToRead);
+	// tmより前/以後でもっとも新しい/古いログファイルをアーカイブから探す
+	static const char *FindZippedLogfile(FIND_LOGFILE_CACHE &cache, bool &bSameResult, LPCTSTR zipPath, unsigned int tm, bool bBeforeOrAfter);
 
 	int currentJKID_;
 	CTextFileReader readLogfile_;
