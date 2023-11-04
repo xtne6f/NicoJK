@@ -124,6 +124,7 @@ CNicoJK::CNicoJK()
 	, currentJKForceByChatCountTick_(0)
 	, lastPostTick_(0)
 	, bRecording_(false)
+	, hQuitCheckRecordingEvent_(nullptr)
 	, bUsingLogfileDriver_(false)
 	, bSetStreamCallback_(false)
 	, bResyncComment_(false)
@@ -385,6 +386,35 @@ void CNicoJK::SyncThread()
 	}
 }
 
+void CNicoJK::CheckRecordingThread(DWORD processID)
+{
+	const DWORD CMD_SUCCESS = TRUE;
+	const DWORD VIEW_APP_ST_REC = 2;
+	const DWORD cmdViewAppGetStatus[] = {207, 0};
+	TCHAR pipeName[64];
+	_stprintf_s(pipeName, TEXT("\\\\.\\pipe\\View_Ctrl_BonNoWaitPipe_%d"), processID);
+
+	while (WaitForSingleObject(hQuitCheckRecordingEvent_, 2000) == WAIT_TIMEOUT) {
+		// EDCBのCtrlCmdインタフェースにアクセスしてその録画状態を調べる
+		HANDLE pipe = CreateFile(pipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+		if (pipe != INVALID_HANDLE_VALUE) {
+			DWORD n;
+			if (WriteFile(pipe, cmdViewAppGetStatus, sizeof(cmdViewAppGetStatus), &n, nullptr) && n == sizeof(cmdViewAppGetStatus)) {
+				DWORD res[3];
+				n = 0;
+				for (DWORD m; n < sizeof(res) && ReadFile(pipe, reinterpret_cast<BYTE*>(res) + n, sizeof(res) - n, &m, nullptr); n += m);
+				if (n == sizeof(res) && res[0] == CMD_SUCCESS) {
+					bRecording_ = res[2] == VIEW_APP_ST_REC;
+				}
+			}
+			CloseHandle(pipe);
+		} else if (GetLastError() != ERROR_PIPE_BUSY) {
+			break;
+		}
+	}
+	bRecording_ = false;
+}
+
 void CNicoJK::ToggleStreamCallback(bool bSet)
 {
 	if (bSet) {
@@ -441,6 +471,7 @@ void CNicoJK::LoadFromIni()
 	s_.commentDrawLineCount = GetBufferedProfileInt(buf.data(), TEXT("commentDrawLineCount"), CCommentWindow::DEFAULT_LINE_DRAW_COUNT);
 	s_.commentShareMode		= GetBufferedProfileInt(buf.data(), TEXT("commentShareMode"), 0);
 	s_.logfileMode			= GetBufferedProfileInt(buf.data(), TEXT("logfileMode"), 0);
+	s_.bCheckProcessRecording = GetBufferedProfileInt(buf.data(), TEXT("checkProcessRecording"), 1) != 0;
 	s_.logfileDrivers		= GetBufferedProfileToString(buf.data(), TEXT("logfileDrivers"),
 							                             TEXT("BonDriver_UDP.dll:BonDriver_TCP.dll:BonDriver_File.dll:BonDriver_RecTask.dll:BonDriver_TsTask.dll:")
 							                             TEXT("BonDriver_NetworkPipe.dll:BonDriver_Pipe.dll:BonDriver_Pipe2.dll"));
@@ -1735,10 +1766,36 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				SetTVTestPanelItem(GetDlgItem(hwnd, IDC_CHECK_RELATIVE), m_pApp, TVTestPanelButtonProc);
 			}
 
-			if (s_.commentShareMode == 1 || s_.commentShareMode == 2) {
-				// 投稿機能は投稿欄を表示しているときだけ
-				if (!jkTransfer_.Open(hwnd, WMS_TRANSFER, s_.commentShareMode == 2 && cookie_[0])) {
-					m_pApp->AddLog(L"設定commentShareModeを有効にできませんでした。", TVTest::LOG_TYPE_WARNING);
+			if (s_.commentShareMode == 1 || s_.commentShareMode == 2 || s_.bCheckProcessRecording) {
+				// コマンドラインで指定されていればコメント共有の検索用プロセスIDを上書きする
+				DWORD processID = 0;
+				int argc;
+				LPTSTR *argv = CommandLineToArgvW(GetCommandLine(), &argc);
+				if (argv) {
+					for (int i = 1; i + 1 < argc; ++i) {
+						if (_tcsicmp(argv[i], TEXT("/jkshpid")) == 0 ||
+						    _tcsicmp(argv[i], TEXT("-jkshpid")) == 0) {
+							processID = _tcstoul(argv[i + 1], nullptr, 10);
+							if (processID != 0 && s_.bCheckProcessRecording) {
+								// 録画状態をチェックするスレッドを起動
+								hQuitCheckRecordingEvent_ = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+								if (hQuitCheckRecordingEvent_) {
+									checkRecordingThread_ = std::thread([this, processID]() { CheckRecordingThread(processID); });
+								}
+							}
+							break;
+						}
+					}
+					LocalFree(argv);
+				}
+				if (processID == 0) {
+					processID = GetCurrentProcessId();
+				}
+				if (s_.commentShareMode == 1 || s_.commentShareMode == 2) {
+					// 投稿機能は投稿欄を表示しているときだけ
+					if (!jkTransfer_.Open(hwnd, WMS_TRANSFER, s_.commentShareMode == 2 && cookie_[0], processID)) {
+						m_pApp->AddLog(L"設定commentShareModeを有効にできませんでした。", TVTest::LOG_TYPE_WARNING);
+					}
 				}
 			}
 			return TRUE;
@@ -1746,6 +1803,13 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 		return FALSE;
 	case WM_DESTROY:
 		{
+			// 録画状態をチェックするスレッドを終了
+			if (hQuitCheckRecordingEvent_) {
+				SetEvent(hQuitCheckRecordingEvent_);
+				checkRecordingThread_.join();
+				CloseHandle(hQuitCheckRecordingEvent_);
+				hQuitCheckRecordingEvent_ = nullptr;
+			}
 			// パネルアイテムのサブクラス化を解除
 			if (hPanel_) {
 				ResetTVTestPanelItem(GetDlgItem(hwnd, IDC_RADIO_FORCE));

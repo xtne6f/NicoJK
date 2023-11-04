@@ -20,6 +20,13 @@ NicoJK.tvtpおよびNicoJK.iniをTVTestのPluginフォルダに入れてくだ�
 に保存されていきます。録画中に受信した実況コメントがファイル再生プラグイン(何で
 もいい)で再生中に表示されればOKです。
 
+おもにEpgDataCap_Bonの"Viewボタン"に協調する機能として、/jkshpid起動オプションを
+用意しています。TVTestを
+> TVTest.exe /jkshpid {EpgDataCap_BonのプロセスID}
+のように起動することでEpgDataCap_Bonの録画状態に応じたログの記録や、EDCBのWebUI
+に対するコメントの提供が可能です。
+※NicoJK.iniのcommentShareMode、logfileMode、logfileDriversを調整してください。
+
 同梱のjkimlog.exeは外部のログファイルを"NicoJK"フォルダに取り込むコマンドライン
 ツールです。使用する場合はjkimlog.exeを"NicoJK"フォルダの直下に置いてください。
 ログファイル(.jklか.xmlか.txtで、ファイル名のどこかに"jk{番号}"を含むこと)のパス
@@ -108,7 +115,10 @@ NicoJK.iniのcommentShareModeを1にすると受信中のchatタグを名前付�
 "\\.\pipe\post_d7b64ac2_{プロセスID}" に書き込める。
 "d7b64ac2"は名前の競合を防ぐための単なる定数。プロセスIDは対象の実況に紐づいた映
 像などを処理しているプロセスのプロセスIDなので、名前付きパイプを作成したプロセス
-とは異なるかもしれない(NicoJKの場合は同じ)。
+とは異なるかもしれない。NicoJKではTVTestのコマンドラインオプションに
+  /jkshpid {プロセスID}
+と指定されていれば(映像のソースが他プロセスにあってBonDriver経由で視聴しているだ
+けの場合など)そのプロセスID、指定されていなければTVTest自体のプロセスIDを使う。
 
 ["chat"パイプやjkrdlog.exeの出力の仕様]
 データの出力ごとに必ず80文字(バイト単位)の以下のようなヘッダがつく。

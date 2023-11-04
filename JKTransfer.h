@@ -16,14 +16,14 @@ public:
 	~CJKTransfer();
 	void BeginClose();
 	void Close();
-	bool Open(HWND hwnd, UINT msg, bool bEnablePost);
+	bool Open(HWND hwnd, UINT msg, bool bEnablePost, DWORD processID);
 	// コメントを送る
 	bool SendChat(int jkID, const char *text);
 	// 投稿を受信する
 	std::string ProcessRecvPost();
 private:
-	bool CreateWorker(HWND hwnd, UINT msg, bool bEnablePost);
-	void WorkerThread(HWND hwnd, UINT msg, bool bEnablePost);
+	bool CreateWorker(HWND hwnd, UINT msg, bool bEnablePost, DWORD processID);
+	void WorkerThread(HWND hwnd, UINT msg, bool bEnablePost, DWORD processID);
 
 	recursive_mutex_ workerLock_;
 	std::thread workerThread_;

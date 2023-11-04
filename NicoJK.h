@@ -51,6 +51,7 @@ private:
 		int commentDrawLineCount;
 		int commentShareMode;
 		int logfileMode;
+		bool bCheckProcessRecording;
 		tstring logfileDrivers;
 		tstring nonTunerDrivers;
 		tstring logfileFolder;
@@ -103,6 +104,7 @@ private:
 	bool TogglePlugin(bool bEnabled);
 	void ToggleStreamCallback(bool bSet);
 	void SyncThread();
+	void CheckRecordingThread(DWORD processID);
 	static std::vector<NETWORK_SERVICE_ID_ELEM>::iterator LowerBoundNetworkServiceID(std::vector<NETWORK_SERVICE_ID_ELEM>::iterator first,
 	                                                                                 std::vector<NETWORK_SERVICE_ID_ELEM>::iterator last, DWORD ntsID);
 	static std::vector<FORCE_ELEM>::iterator LowerBoundJKID(std::vector<FORCE_ELEM>::iterator first,
@@ -179,7 +181,9 @@ private:
 	TCHAR lastPostComm_[POST_COMMENT_MAX];
 
 	// 過去ログ関係
-	bool bRecording_;
+	std::atomic_bool bRecording_;
+	std::thread checkRecordingThread_;
+	HANDLE hQuitCheckRecordingEvent_;
 	bool bUsingLogfileDriver_;
 	bool bSetStreamCallback_;
 	bool bResyncComment_;

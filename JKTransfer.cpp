@@ -39,14 +39,14 @@ void CJKTransfer::Close()
 	}
 }
 
-bool CJKTransfer::CreateWorker(HWND hwnd, UINT msg, bool bEnablePost)
+bool CJKTransfer::CreateWorker(HWND hwnd, UINT msg, bool bEnablePost, DWORD processID)
 {
 	if (bWorkerCreated_) {
 		return true;
 	}
 	hWorkerEvent_ = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 	if (hWorkerEvent_) {
-		workerThread_ = std::thread([this, hwnd, msg, bEnablePost]() { WorkerThread(hwnd, msg, bEnablePost); });
+		workerThread_ = std::thread([this, hwnd, msg, bEnablePost, processID]() { WorkerThread(hwnd, msg, bEnablePost, processID); });
 		// 初期化を待つ
 		WaitForSingleObject(hWorkerEvent_, INFINITE);
 		if (bWorkerCreated_) {
@@ -60,17 +60,17 @@ bool CJKTransfer::CreateWorker(HWND hwnd, UINT msg, bool bEnablePost)
 	return false;
 }
 
-void CJKTransfer::WorkerThread(HWND hwnd, UINT msg, bool bEnablePost)
+void CJKTransfer::WorkerThread(HWND hwnd, UINT msg, bool bEnablePost, DWORD processID)
 {
 	HANDLE hChatPipe = INVALID_HANDLE_VALUE;
 	HANDLE hPostPipe = INVALID_HANDLE_VALUE;
 	HANDLE olEvents[] = {hWorkerEvent_, CreateEvent(nullptr, TRUE, TRUE, nullptr), CreateEvent(nullptr, TRUE, TRUE, nullptr)};
 	if (olEvents[1] && olEvents[2]) {
 		TCHAR pipeName[64];
-		_stprintf_s(pipeName, TEXT("\\\\.\\pipe\\chat_d7b64ac2_%d"), GetCurrentProcessId());
+		_stprintf_s(pipeName, TEXT("\\\\.\\pipe\\chat_d7b64ac2_%d"), processID);
 		hChatPipe = CreateNamedPipe(pipeName, PIPE_ACCESS_OUTBOUND | FILE_FLAG_OVERLAPPED, 0, 1, CHAT_BUFFER_SIZE, 0, 0, nullptr);
 		if (bEnablePost) {
-			_stprintf_s(pipeName, TEXT("\\\\.\\pipe\\post_d7b64ac2_%d"), GetCurrentProcessId());
+			_stprintf_s(pipeName, TEXT("\\\\.\\pipe\\post_d7b64ac2_%d"), processID);
 			hPostPipe = CreateNamedPipe(pipeName, PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED, 0, 1, 0, POST_BUFFER_SIZE, 0, nullptr);
 		}
 	}
@@ -260,13 +260,13 @@ void CJKTransfer::WorkerThread(HWND hwnd, UINT msg, bool bEnablePost)
 	CloseHandle(olEvents[1]);
 }
 
-bool CJKTransfer::Open(HWND hwnd, UINT msg, bool bEnablePost)
+bool CJKTransfer::Open(HWND hwnd, UINT msg, bool bEnablePost, DWORD processID)
 {
 	Close();
 	currentJKID_ = -1;
 	chatBuf_.clear();
 	postStr_.clear();
-	return CreateWorker(hwnd, msg, bEnablePost);
+	return CreateWorker(hwnd, msg, bEnablePost, processID);
 }
 
 bool CJKTransfer::SendChat(int jkID, const char *text)
