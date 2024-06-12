@@ -379,9 +379,6 @@ std::string UnprotectV10ToString(const char *src, const char *v10Key, char *buf,
 // コマンドを実行してCookieを得る
 std::string GetCookieString(LPCTSTR execGetCookie, LPCTSTR execGetV10Key, char *buf, size_t bufSize, int timeout)
 {
-	if (!_tcsicmp(execGetCookie, TEXT("cmd /c echo ;"))) {
-		return ";";
-	}
 	TCHAR currDir[MAX_PATH];
 	if (GetLongModuleFileName(nullptr, currDir, _countof(currDir))) {
 		for (size_t i = _tcslen(currDir); i > 0 && !_tcschr(TEXT("/\\"), currDir[i - 1]); ) {

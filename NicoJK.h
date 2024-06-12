@@ -58,6 +58,7 @@ private:
 		tstring execGetCookie;
 		tstring execGetV10Key;
 		std::string channelsUri;
+		std::string refugeUri;
 		tstring mailDecorations;
 		bool bAnonymity;
 		bool bUseOsdCompositor;

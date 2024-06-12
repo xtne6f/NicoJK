@@ -47,6 +47,17 @@ NicoJK.tvtpおよびNicoJK.iniをTVTestのPluginフォルダに入れてくだ�
 ■設定
 NicoJK.iniを確認してください。
 
+■避難所への接続について
+2024年6月のニコニコの障害にともない、tsukumi氏(https://github.com/tsukumijima/)
+がサーバー(https://nx-jikkyo.tsukumijima.net/)を公開されたので、一般にこのような
+避難所への接続ができる設定キーを追加しました。
+具体的に上記サーバーに接続する場合はNicoJK.iniを
+
+refugeUri=wss://nx-jikkyo.tsukumijima.net/api/v1/channels/{jkID}/ws/watch
+
+などとしてください(2024年6月12日時点)。
+避難所の利用の可否などは各サーバーの管理者のルールに従ってください。
+
 ■コメント投稿について
 コメント投稿機能を有効にする場合は以下の作業を行ってください:
 ※DTV板の有志により、ブラウザに依存しないログインツールなども提供されています。

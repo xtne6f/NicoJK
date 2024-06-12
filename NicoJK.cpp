@@ -295,7 +295,12 @@ bool CNicoJK::TogglePlugin(bool bEnabled)
 			// 必要ならサーバに渡すCookieを取得
 			cookie_[0] = '\0';
 			if (!s_.execGetCookie.empty()) {
-				std::string strCookie = GetCookieString(s_.execGetCookie.c_str(), s_.execGetV10Key.c_str(), cookie_, _countof(cookie_), 10000);
+				// 投稿欄を表示するだけ
+				std::string strCookie = ";";
+				// 避難所に接続するときは実行しない
+				if (s_.refugeUri.empty() && _tcsicmp(s_.execGetCookie.c_str(), TEXT("cmd /c echo ;"))) {
+					strCookie = GetCookieString(s_.execGetCookie.c_str(), s_.execGetV10Key.c_str(), cookie_, _countof(cookie_), 10000);
+				}
 				if (strCookie.empty()) {
 					m_pApp->AddLog(L"execGetCookieの実行に失敗しました。", TVTest::LOG_TYPE_ERROR);
 				}
@@ -485,6 +490,13 @@ void CNicoJK::LoadFromIni()
 	for (size_t i = 0; i < val.size(); ++i) {
 		if (TEXT('!') <= val[i] && val[i] <= TEXT('~')) {
 			s_.channelsUri += static_cast<char>(val[i]);
+		}
+	}
+	val						= GetBufferedProfileToString(buf.data(), TEXT("refugeUri"), TEXT(""));
+	s_.refugeUri.clear();
+	for (size_t i = 0; i < val.size(); ++i) {
+		if (TEXT('!') <= val[i] && val[i] <= TEXT('~')) {
+			s_.refugeUri += static_cast<char>(val[i]);
 		}
 	}
 	s_.mailDecorations		= GetBufferedProfileToString(buf.data(), TEXT("mailDecorations"), TEXT("[cyan]:[red]:[green small]:[orange]::"));
@@ -2165,7 +2177,25 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				// chatStreamIDに変換
 				std::vector<FORCE_ELEM>::const_iterator it = LowerBoundJKID(forceList_.begin(), forceList_.end(), currentJKToGet_);
 				if (it != forceList_.end() && it->jkID == currentJKToGet_ && !it->chatStreamID.empty()) {
-					if (jkStream_.Send(hwnd, WMS_JK, 'L', (it->chatStreamID + " " + cookie_).c_str())) {
+					if (!s_.refugeUri.empty()) {
+						// 避難所に接続
+						std::string uri = s_.refugeUri;
+						for (size_t i; (i = uri.find("{jkID}")) != std::string::npos;) {
+							char text[16];
+							sprintf_s(text, "jk%d", it->jkID);
+							uri.replace(i, sizeof("{jkID}") - 1, text);
+						}
+						for (size_t i; (i = uri.find("{chatStreamID}")) != std::string::npos;) {
+							uri.replace(i, sizeof("{chatStreamID}") - 1, it->chatStreamID);
+						}
+						if (jkStream_.Send(hwnd, WMS_JK, 'R', ("1 " + uri).c_str())) {
+							currentJK_ = currentJKToGet_;
+							currentJKChatCount_ = 0;
+							currentJKForceByChatCount_ = -1;
+							currentJKForceByChatCountTick_ = GetTickCount();
+							OutputMessageLog(TEXT("コメントサーバ(避難所)に接続開始しました。"));
+						}
+					} else if (jkStream_.Send(hwnd, WMS_JK, 'L', (it->chatStreamID + " " + cookie_).c_str())) {
 						currentJK_ = currentJKToGet_;
 						currentJKChatCount_ = 0;
 						currentJKForceByChatCount_ = -1;
