@@ -49,8 +49,8 @@ NicoJK.iniを確認してください。
 
 ■避難所への接続について
 2024年6月のニコニコの障害にともない、tsukumi氏(https://github.com/tsukumijima/)
-がサーバー(https://nx-jikkyo.tsukumijima.net/)を公開されたので、一般にこのような
-避難所への接続ができる設定キーを追加しました。
+がサーバー( https://nx-jikkyo.tsukumijima.net/ )を公開されたので、一般にこのよう
+な避難所への接続ができる設定キーを追加しました。
 具体的に上記サーバーに接続する場合はNicoJK.iniを
 
 refugeUri=wss://nx-jikkyo.tsukumijima.net/api/v1/channels/{jkID}/ws/watch
