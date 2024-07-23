@@ -1200,7 +1200,7 @@ bool CNicoJK::ProcessChatTag(const char *tag, bool bShow, int showDelay)
 	static const std::regex reYourpost(" yourpost=\"1\"");
 	static const std::regex reInsertAt(" insert_at=\"last\"");
 	static const std::regex reAlign(" align=\"(left|right)");
-	static const std::regex reUserID(" user_id=\"([0-9A-Za-z\\-_]{0,27})");
+	static const std::regex reUserID(" user_id=\"([0-9A-Za-z\\-_:]{0,27})");
 	static const std::regex reNo(" no=\"(\\d+)\"");
 	static const std::regex reLogcmd(" logcmd=\"(.*?)\"");
 	// 置換
@@ -2082,15 +2082,18 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 						// ユーザーNGの置換パターンをつくる
 						RPL_ELEM e;
 						e.section = TEXT("AutoReplace");
-						// 14文字で切っているのは単に表現を短くするため。深い理由はない
-						TCHAR pattern[256];
-						_stprintf_s(pattern, TEXT("s/^<chat(?=.*? user_id=\"%.14s%s.*>.*<)/<chat abone=\"1\"/g"),
-						            it->marker, _tcslen(it->marker) > 14 ? TEXT("") : TEXT("\""));
+						// 20文字で切っているのは単に表現を短くするため。深い理由はない
+						TCHAR pattern[128];
+						_stprintf_s(pattern, TEXT("s/^<chat(?=[^>]*? user_id=\"%.20s%s)/<chat abone=\"1\"/g"),
+						            it->marker, _tcslen(it->marker) > 20 ? TEXT("") : TEXT("\""));
 						if (e.SetPattern(pattern)) {
+							// 旧仕様のパターン
+							_stprintf_s(pattern, TEXT("s/^<chat(?=.*? user_id=\"%.14s%s.*>.*<)/<chat abone=\"1\"/g"),
+							            it->marker, _tcslen(it->marker) > 14 ? TEXT("") : TEXT("\""));
 							// 既存パターンかどうか調べる
 							std::vector<RPL_ELEM> autoRplList;
 							LoadRplListFromIni(TEXT("AutoReplace"), &autoRplList);
-							auto jt = std::find_if(autoRplList.cbegin(), autoRplList.cend(), [&](const RPL_ELEM &a) { return a.pattern == e.pattern; });
+							auto jt = std::find_if(autoRplList.cbegin(), autoRplList.cend(), [&](const RPL_ELEM &a) { return a.pattern == e.pattern || a.pattern == pattern; });
 							// メッセージボックスで確認
 							TCHAR header[_countof(it->marker) + 32];
 							_stprintf_s(header, TEXT(">>%d ID:%s\n"), it->no, it->marker);
