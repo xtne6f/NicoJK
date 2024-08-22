@@ -127,6 +127,7 @@ CNicoJK::CNicoJK()
 	, currentJKForceByChatCountTick_(0)
 	, lastPostTick_(0)
 	, bPostToRefuge_(false)
+	, bPostToRefugeInverted_(false)
 	, bRecording_(false)
 	, hQuitCheckRecordingEvent_(nullptr)
 	, bUsingLogfileDriver_(false)
@@ -598,6 +599,7 @@ void CNicoJK::LoadForceListFromIni(const tstring &logfileFolder)
 			FORCE_ELEM e;
 			e.jkID = DEFAULT_JKID_NAME_TABLE[i].jkID;
 			e.chatStreamID = DEFAULT_JKID_NAME_TABLE[i].chatStreamID;
+			e.refugeChatStreamID = e.chatStreamID;
 			e.force = -1;
 			e.bFixedName = false;
 			forceList_.push_back(e);
@@ -614,13 +616,23 @@ void CNicoJK::LoadForceListFromIni(const tstring &logfileFolder)
 			_stprintf_s(key, TEXT("%d"), e.jkID);
 			tstring val = GetBufferedProfileToString(buf.data(), key, TEXT("!"));
 			if (val != TEXT("!")) {
+				bool bFirstVal = true;
 				for (size_t i = 0; i < val.size(); ++i) {
 					if ((TEXT('0') <= val[i] && val[i] <= TEXT('9')) ||
 					    (TEXT('A') <= val[i] && val[i] <= TEXT('Z')) ||
 					    (TEXT('a') <= val[i] && val[i] <= TEXT('z'))) {
-						e.chatStreamID += static_cast<char>(val[i]);
+						char c = static_cast<char>(val[i]);
+						e.refugeChatStreamID += c;
+						if (bFirstVal) {
+							e.chatStreamID += c;
+						}
+					} else if (val[i] == TEXT(',') && bFirstVal) {
+						// カンマ区切りがあれば後者が避難所の値
+						e.refugeChatStreamID.clear();
+						bFirstVal = false;
 					} else {
 						e.chatStreamID.clear();
+						e.refugeChatStreamID.clear();
 						TCHAR text[64];
 						_stprintf_s(text, TEXT("[ChatStreams]のキー%sの値が不正です。"), key);
 						m_pApp->AddLog(text, TVTest::LOG_TYPE_ERROR);
@@ -632,10 +644,10 @@ void CNicoJK::LoadForceListFromIni(const tstring &logfileFolder)
 				// まだなければ追加
 				std::vector<FORCE_ELEM>::iterator it = LowerBoundJKID(forceList_.begin(), forceList_.end(), e.jkID);
 				if (it == forceList_.end() || it->jkID != e.jkID) {
-					if (!e.chatStreamID.empty()) {
+					if (!e.chatStreamID.empty() || !e.refugeChatStreamID.empty()) {
 						forceList_.insert(it, e);
 					}
-				} else if (e.chatStreamID.empty()) {
+				} else if (e.chatStreamID.empty() && e.refugeChatStreamID.empty()) {
 					forceList_.erase(it);
 				} else {
 					*it = e;
@@ -1385,6 +1397,7 @@ void CNicoJK::ProcessLocalPost(LPCTSTR comm)
 	} else if (!_tcsicmp(cmd, TEXT("sw"))) {
 		if (s_.bRefugeMixing) {
 			bPostToRefuge_ = !bPostToRefuge_;
+			bPostToRefugeInverted_ = false;
 			InvalidateRect(hForce_, nullptr, FALSE);
 		}
 		TCHAR text[64];
@@ -1744,6 +1757,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			currentJKToGet_ = -1;
 			lastPostComm_[0] = TEXT('\0');
 			bPostToRefuge_ = s_.bPostToRefuge;
+			bPostToRefugeInverted_ = false;
 			bUsingLogfileDriver_ = IsMatchDriverName(s_.logfileDrivers.c_str());
 			logReader_.ResetCheckInterval();
 			bSpecFile_ = false;
@@ -2250,8 +2264,8 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			if (currentJKToGet_ >= 0 && !bUsingLogfileDriver_) {
 				// chatStreamIDに変換
 				std::vector<FORCE_ELEM>::const_iterator it = LowerBoundJKID(forceList_.begin(), forceList_.end(), currentJKToGet_);
-				if (it != forceList_.end() && it->jkID == currentJKToGet_ && !it->chatStreamID.empty()) {
-					if (!s_.refugeUri.empty()) {
+				if (it != forceList_.end() && it->jkID == currentJKToGet_) {
+					if (!it->refugeChatStreamID.empty() && !s_.refugeUri.empty()) {
 						// 避難所に接続
 						std::string uri = s_.refugeUri;
 						for (size_t i; (i = uri.find("{jkID}")) != std::string::npos;) {
@@ -2260,27 +2274,57 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 							uri.replace(i, sizeof("{jkID}") - 1, text);
 						}
 						for (size_t i; (i = uri.find("{chatStreamID}")) != std::string::npos;) {
-							uri.replace(i, sizeof("{chatStreamID}") - 1, it->chatStreamID);
+							uri.replace(i, sizeof("{chatStreamID}") - 1, it->refugeChatStreamID);
 						}
+						bool bMix = s_.bRefugeMixing && !it->chatStreamID.empty();
 
 						if (jkStream_.Send(hwnd, WMS_JK, 'R',
-						                   ((s_.bDropForwardedComment || s_.bRefugeMixing ? "2 " : "1 ") + uri +
-						                    (s_.bRefugeMixing ? " " + it->chatStreamID + " " + cookie_ : "")).c_str())) {
+						                   ((s_.bDropForwardedComment || bMix ? "2 " : "1 ") + uri +
+						                    (bMix ? " " + it->chatStreamID + " " + cookie_ : "")).c_str())) {
 							currentJK_ = currentJKToGet_;
 							currentJKChatCount_ = 0;
 							currentJKForceByChatCount_ = -1;
 							currentJKForceByChatCountTick_ = GetTickCount();
 							TCHAR text[64];
-							_stprintf_s(text, TEXT("%s%sに接続開始しました。"), s_.bRefugeMixing ? TEXT("ニコニコ実況と") : TEXT(""),
+							_stprintf_s(text, TEXT("%s%sに接続開始しました。"), bMix ? TEXT("ニコニコ実況と") : TEXT(""),
 							            s_.refugeUri.find("nx-jikkyo") != std::string::npos ? TEXT("NX-Jikkyo") : TEXT("避難所"));
 							OutputMessageLog(text);
+
+							if (bPostToRefugeInverted_) {
+								// 一時的な投稿先を戻す
+								bPostToRefuge_ = !bPostToRefuge_;
+								bPostToRefugeInverted_ = false;
+								InvalidateRect(hwnd, nullptr, FALSE);
+							}
+							if (!bMix && !bPostToRefuge_) {
+								// 一時的に投稿先を変える
+								bPostToRefuge_ = true;
+								bPostToRefugeInverted_ = true;
+								InvalidateRect(hwnd, nullptr, FALSE);
+							}
 						}
-					} else if (jkStream_.Send(hwnd, WMS_JK, 'L', (it->chatStreamID + " " + cookie_).c_str())) {
-						currentJK_ = currentJKToGet_;
-						currentJKChatCount_ = 0;
-						currentJKForceByChatCount_ = -1;
-						currentJKForceByChatCountTick_ = GetTickCount();
-						OutputMessageLog(TEXT("ニコニコ実況に接続開始しました。"));
+					} else if (!it->chatStreamID.empty() && (s_.refugeUri.empty() || s_.bRefugeMixing)) {
+						// ニコニコ実況に接続
+						if (jkStream_.Send(hwnd, WMS_JK, 'L', (it->chatStreamID + " " + cookie_).c_str())) {
+							currentJK_ = currentJKToGet_;
+							currentJKChatCount_ = 0;
+							currentJKForceByChatCount_ = -1;
+							currentJKForceByChatCountTick_ = GetTickCount();
+							OutputMessageLog(TEXT("ニコニコ実況に接続開始しました。"));
+
+							if (bPostToRefugeInverted_) {
+								// 一時的な投稿先を戻す
+								bPostToRefuge_ = !bPostToRefuge_;
+								bPostToRefugeInverted_ = false;
+								InvalidateRect(hwnd, nullptr, FALSE);
+							}
+							if (bPostToRefuge_) {
+								// 一時的に投稿先を変える
+								bPostToRefuge_ = false;
+								bPostToRefugeInverted_ = true;
+								InvalidateRect(hwnd, nullptr, FALSE);
+							}
+						}
 					}
 				}
 			}
@@ -2516,11 +2560,13 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					if (it->force < 0) {
 						_stprintf_s(text, TEXT("jk%d 勢? (%.63s%s%.63S)"),
 						            it->jkID, it->name.c_str(),
-						            it->chatStreamID.empty() ? TEXT("") : TEXT("-"), it->chatStreamID.c_str());
+						            it->chatStreamID.empty() && it->refugeChatStreamID.empty() ? TEXT("") : TEXT("-"),
+						            (it->chatStreamID.empty() ? it->refugeChatStreamID : it->chatStreamID).c_str());
 					} else {
 						_stprintf_s(text, TEXT("jk%d 勢%d (%.63s%s%.63S)"),
 						            it->jkID, it->force, it->name.c_str(),
-						            it->chatStreamID.empty() ? TEXT("") : TEXT("-"), it->chatStreamID.c_str());
+						            it->chatStreamID.empty() && it->refugeChatStreamID.empty() ? TEXT("") : TEXT("-"),
+						            (it->chatStreamID.empty() ? it->refugeChatStreamID : it->chatStreamID).c_str());
 					}
 					ListBox_AddString(hList, text);
 					if (it->jkID == currentJKToGet_) {
@@ -2590,6 +2636,12 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				OutputMessageLog(TEXT("コメントサーバとの接続を終了しました。"));
 				WriteToLogfile(-1);
 				currentJK_ = -1;
+				if (bPostToRefugeInverted_) {
+					// 一時的な投稿先を戻す
+					bPostToRefuge_ = !bPostToRefuge_;
+					bPostToRefugeInverted_ = false;
+					InvalidateRect(hwnd, nullptr, FALSE);
+				}
 			} else {
 				// 受信中
 				bool bRead = false;

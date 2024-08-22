@@ -96,6 +96,7 @@ private:
 		bool bFixedName;
 		tstring name;
 		std::string chatStreamID;
+		std::string refugeChatStreamID;
 	};
 	enum LOG_ELEM_TYPE {
 		LOG_ELEM_TYPE_DEFAULT,
@@ -206,6 +207,7 @@ private:
 	DWORD lastPostTick_;
 	TCHAR lastPostComm_[POST_COMMENT_MAX];
 	bool bPostToRefuge_;
+	bool bPostToRefugeInverted_;
 
 	// 過去ログ関係
 	std::atomic_bool bRecording_;
