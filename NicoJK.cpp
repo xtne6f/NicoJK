@@ -133,6 +133,8 @@ CNicoJK::CNicoJK()
 	, bUsingLogfileDriver_(false)
 	, bSetStreamCallback_(false)
 	, bResyncComment_(false)
+	, bNicoReceivingPastChat_(false)
+	, bRefugeReceivingPastChat_(false)
 	, currentLogfileJK_(-1)
 	, hLogfile_(INVALID_HANDLE_VALUE)
 	, hLogfileLock_(INVALID_HANDLE_VALUE)
@@ -1216,7 +1218,7 @@ static int GetBrightness(COLORREF cr)
 }
 
 // コメント(chatタグ)1行を解釈してコメントウィンドウに送る
-bool CNicoJK::ProcessChatTag(const char *tag, bool bShow, int showDelay)
+bool CNicoJK::ProcessChatTag(const char *tag, bool bShow, int showDelay, bool *pbRefuge)
 {
 	static const std::regex reChat("<chat(?= )(.*)>(.*?)</chat>");
 	static const std::regex reMail(" mail=\"(.*?)\"");
@@ -1260,6 +1262,9 @@ bool CNicoJK::ProcessChatTag(const char *tag, bool bShow, int showDelay)
 		}
 		// nx_jikkyo|x_refuge属性(有志の避難所等による拡張)
 		bool bRefuge = std::regex_search(m[1].first, m[1].second, reRefuge);
+		if (pbRefuge) {
+			*pbRefuge = bRefuge;
+		}
 		// abone属性(ローカル拡張)
 		bool bAbone = std::regex_search(m[1].first, m[1].second, reAbone);
 		if (bShow && !bAbone) {
@@ -2302,6 +2307,9 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 								bPostToRefugeInverted_ = true;
 								InvalidateRect(hwnd, nullptr, FALSE);
 							}
+							// 過去のコメントの出力状態をリセット
+							bNicoReceivingPastChat_ = false;
+							bRefugeReceivingPastChat_ = false;
 						}
 					} else if (!it->chatStreamID.empty() && (s_.refugeUri.empty() || s_.bRefugeMixing)) {
 						// ニコニコ実況に接続
@@ -2324,6 +2332,9 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 								bPostToRefugeInverted_ = true;
 								InvalidateRect(hwnd, nullptr, FALSE);
 							}
+							// 過去のコメントの出力状態をリセット
+							bNicoReceivingPastChat_ = false;
+							bRefugeReceivingPastChat_ = false;
 						}
 					}
 				}
@@ -2625,9 +2636,10 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			static const std::regex reXRoom("^<x_room ");
 			static const std::regex reNickname("^<x_room(?= )[^>]*? nickname=\"(.*?)\"");
 			static const std::regex reIsLoggedIn("^<x_room(?= )[^>]*? is_logged_in=\"1\"");
-			static const std::regex reIsRefuge("^<x_room(?= )[^>]*? refuge=\"1\"");
+			static const std::regex reIsRefuge("^<[^>]*? refuge=\"1\"");
 			static const std::regex reXDisconnect("^<x_disconnect(?= )[^>]*? status=\"(\\d+)\"");
-			static const std::regex reXDisconnectIsRefuge("^<x_disconnect(?= )[^>]*? refuge=\"1\"");
+			static const std::regex reXPastChatBegin("^<x_past_chat_begin ");
+			static const std::regex reXPastChatEnd("^<x_past_chat_end ");
 
 			jkBuf_.clear();
 			int ret = jkStream_.ProcessRecv(jkBuf_);
@@ -2657,9 +2669,14 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					const char *rpl = &*it;
 					if (!strncmp(rpl, "<chat ", 6)) {
 						// 指定ファイル再生中は混じると鬱陶しいので表示しない。後退指定はある程度反映
-						if (ProcessChatTag(rpl, !bSpecFile_, static_cast<int>(min(max(-forwardOffset_, 0LL), 30000LL)))) {
-							dprintf(TEXT("#")); // DEBUG
-							WriteToLogfile(currentJK_, rpl);
+						bool bRefuge = false;
+						if (ProcessChatTag(rpl, !bSpecFile_, static_cast<int>(min(max(-forwardOffset_, 0LL), 30000LL)), &bRefuge)) {
+							bool bReceivingPastChat = bRefuge ? bRefugeReceivingPastChat_ : bNicoReceivingPastChat_;
+							dprintf(TEXT("#%c#"), bReceivingPastChat ? TEXT('P') : TEXT('L')); // DEBUG
+							// ログの不整合を避けるため過去のコメントは保存しない
+							if (!bReceivingPastChat) {
+								WriteToLogfile(currentJK_, rpl);
+							}
 							jkTransfer_.SendChat(currentJK_, rpl);
 							++currentJKChatCount_;
 							bRead = true;
@@ -2694,12 +2711,22 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 						} else if (std::regex_search(rpl, m, reXDisconnect)) {
 							// 混合接続時に個々切断した
 							int status = strtol(m[1].first, nullptr, 10);
-							bool isRefuge = std::regex_search(rpl, reXDisconnectIsRefuge);
+							bool isRefuge = std::regex_search(rpl, reIsRefuge);
 							TCHAR text[64];
 							_stprintf_s(text, TEXT("%sから切断または接続に失敗しました(status=%d)。"),
 							            !isRefuge ? TEXT("ニコニコ実況") : s_.refugeUri.find("nx-jikkyo") != std::string::npos ? TEXT("NX-Jikkyo") : TEXT("避難所"),
 							            status);
+							// 過去のコメントの出力状態をリセット
+							(isRefuge ? bRefugeReceivingPastChat_ : bNicoReceivingPastChat_) = false;
 							OutputMessageLog(text);
+						} else if (std::regex_search(rpl, m, reXPastChatBegin)) {
+							// 過去のコメントの出力開始
+							bool isRefuge = std::regex_search(rpl, reIsRefuge);
+							(isRefuge ? bRefugeReceivingPastChat_ : bNicoReceivingPastChat_) = true;
+						} else if (std::regex_search(rpl, m, reXPastChatEnd)) {
+							// 過去のコメントの出力終了
+							bool isRefuge = std::regex_search(rpl, reIsRefuge);
+							(isRefuge ? bRefugeReceivingPastChat_ : bNicoReceivingPastChat_) = false;
 						}
 					}
 #ifdef _DEBUG

@@ -147,7 +147,7 @@ private:
 	bool ReadFromLogfile(int jkID, const char **text = nullptr, unsigned int tmToRead = 0);
 	static LRESULT CALLBACK EventCallback(UINT Event, LPARAM lParam1, LPARAM lParam2, void *pClientData);
 	static BOOL CALLBACK WindowMsgCallback(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam, LRESULT *pResult, void *pUserData);
-	bool ProcessChatTag(const char *tag, bool bShow = true, int showDelay = 0);
+	bool ProcessChatTag(const char *tag, bool bShow = true, int showDelay = 0, bool *pbRefuge = nullptr);
 	void OutputMessageLog(LPCTSTR text);
 	void GetPostComboBoxText(LPTSTR comm, size_t commSize, LPTSTR mail = nullptr, size_t mailSize = 0);
 	void ProcessLocalPost(LPCTSTR comm);
@@ -216,6 +216,8 @@ private:
 	bool bUsingLogfileDriver_;
 	bool bSetStreamCallback_;
 	bool bResyncComment_;
+	bool bNicoReceivingPastChat_;
+	bool bRefugeReceivingPastChat_;
 	int currentLogfileJK_;
 	HANDLE hLogfile_;
 	HANDLE hLogfileLock_;
