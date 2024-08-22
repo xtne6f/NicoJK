@@ -15,6 +15,7 @@ BOOL WritePrivateProfileInt(LPCTSTR lpAppName, LPCTSTR lpKeyName, int value, LPC
 DWORD GetLongModuleFileName(HMODULE hModule, LPTSTR lpFileName, DWORD nSize);
 bool HasToken(const char *str, const char *substr);
 void DecodeEntityReference(TCHAR *str);
+std::string TStringToPrintableAsciiString(LPCTSTR str);
 COLORREF GetColor(const char *command);
 LONGLONG UnixTimeToFileTime(unsigned int tm);
 unsigned int FileTimeToUnixTime(LONGLONG ll);

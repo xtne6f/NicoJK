@@ -498,7 +498,7 @@ void CCommentWindow::OnParentSize()
 }
 
 // コメントを1つだけ追加する
-void CCommentWindow::AddChat(LPCTSTR text, COLORREF color, CHAT_POSITION position,
+void CCommentWindow::AddChat(LPCTSTR text, COLORREF color, COLORREF shadowColor, CHAT_POSITION position,
                              CHAT_SIZE size, CHAT_ALIGN align, bool bInsertLast, BYTE backOpacity, int delay)
 {
 	if (hwnd_) {
@@ -511,6 +511,9 @@ void CCommentWindow::AddChat(LPCTSTR text, COLORREF color, CHAT_POSITION positio
 		c.colorG = GetGValue(color);
 		c.colorR = GetRValue(color);
 		c.colorA = bAntiAlias_ ? backOpacity : backOpacity ? 255 : 0;
+		c.shadowColorB = GetBValue(shadowColor);
+		c.shadowColorG = GetGValue(shadowColor);
+		c.shadowColorR = GetRValue(shadowColor);
 		c.position = position;
 		c.bSmall = size != CHAT_SIZE_DEFAULT;
 		c.alignFactor = position==CHAT_POS_DEFAULT || align==CHAT_ALIGN_LEFT ? 0 : align==CHAT_ALIGN_RIGHT ? 2 : 1;
@@ -988,7 +991,7 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 			}
 			Gdiplus::ARGB color = Gdiplus::Color::MakeARGB(it->colorA, it->colorR, it->colorG, it->colorB);
 			Gdiplus::Color foreColor(color | Gdiplus::Color::AlphaMask);
-			Gdiplus::Color shadowColor(3*foreColor.GetR() + 6*foreColor.GetG() + foreColor.GetB() < 255 ? Gdiplus::Color::White : Gdiplus::Color::Black);
+			Gdiplus::Color shadowColor(it->shadowColorR, it->shadowColorG, it->shadowColorB);
 			Gdiplus::Color backColor1(Gdiplus::Color(color).GetA(), shadowColor.GetR(), shadowColor.GetG(), shadowColor.GetB());
 			Gdiplus::Color backColor2(bAntiAlias_ ? color : backColor1.GetValue());
 			bool bOpaque = backColor1.GetA() != 0;

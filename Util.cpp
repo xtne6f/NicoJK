@@ -166,6 +166,18 @@ void DecodeEntityReference(TCHAR *str)
 	*p = TEXT('\0');
 }
 
+std::string TStringToPrintableAsciiString(LPCTSTR str)
+{
+	// ASCII印字可能文字だけ抽出。空白を含まないことに注意
+	std::string ret;
+	for (size_t i = 0; str[i]; ++i) {
+		if (TEXT('!') <= str[i] && str[i] <= TEXT('~')) {
+			ret += static_cast<char>(str[i]);
+		}
+	}
+	return ret;
+}
+
 COLORREF GetColor(const char *command)
 {
 	static const std::regex re("(?:^| )#([0-9A-Fa-f]{6})(?: |$)");

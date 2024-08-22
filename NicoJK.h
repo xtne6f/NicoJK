@@ -17,6 +17,8 @@ public:
 	static const int UPDATE_FORCE_INTERVAL = 20000;
 	// コメントサーバ切断をチェックして再接続する間隔(あんまり短くしちゃダメ!)
 	static const int JK_WATCHDOG_INTERVAL = 20000;
+	// チャンネル変更などでコメントサーバ切断してから再接続するまでの猶予
+	static const int JK_WATCHDOG_RECONNEC_DELAY = 3000;
 	// ログファイルフォルダの更新をチェックする間隔
 	static const int READ_LOG_FOLDER_INTERVAL = 3000;
 	// チャンネル変更などの後に適当な実況IDのチェックを行うまでの猶予
@@ -59,6 +61,17 @@ private:
 		tstring execGetV10Key;
 		std::string channelsUri;
 		std::string refugeUri;
+		bool bDropForwardedComment;
+		bool bRefugeMixing;
+		bool bPostToRefuge;
+		COLORREF crNicoEditBox;
+		COLORREF crRefugeEditBox;
+		COLORREF crNicoMarker;
+		COLORREF crRefugeMarker;
+		COLORREF crNicoLightShadow;
+		COLORREF crRefugeLightShadow;
+		COLORREF crNicoDarkShadow;
+		COLORREF crRefugeDarkShadow;
 		tstring mailDecorations;
 		bool bAnonymity;
 		bool bUseOsdCompositor;
@@ -84,8 +97,16 @@ private:
 		tstring name;
 		std::string chatStreamID;
 	};
+	enum LOG_ELEM_TYPE {
+		LOG_ELEM_TYPE_DEFAULT,
+		LOG_ELEM_TYPE_HIDE,
+		LOG_ELEM_TYPE_REFUGE,
+		LOG_ELEM_TYPE_REFUGE_HIDE,
+		LOG_ELEM_TYPE_MESSAGE,
+	};
 	struct LOG_ELEM {
 		SYSTEMTIME st;
+		LOG_ELEM_TYPE type;
 		int no;
 		COLORREF cr;
 		TCHAR marker[28];
@@ -146,6 +167,8 @@ private:
 	// 勢い窓
 	HWND hPanel_;
 	HWND hForce_;
+	HWND hForcePostEditBox_;
+	HBRUSH hbrForcePostEditBox_;
 	HFONT hForceFont_;
 	bool bDisplayLogList_;
 	std::vector<FORCE_ELEM> forceList_;
@@ -153,8 +176,10 @@ private:
 	size_t logListDisplayedSize_;
 	bool bPendingTimerUpdateList_;
 	DWORD lastUpdateListTick_;
-	tstring lastCalcText_;
-	int lastCalcWidth_;
+	tstring lastCalcLeftText_;
+	tstring lastCalcMiddleText_;
+	int lastCalcLeftWidth_;
+	int lastCalcMiddleWidth_;
 
 	// コメント描画ウィンドウ
 	CCommentWindow commentWindow_;
@@ -180,6 +205,7 @@ private:
 	DWORD currentJKForceByChatCountTick_;
 	DWORD lastPostTick_;
 	TCHAR lastPostComm_[POST_COMMENT_MAX];
+	bool bPostToRefuge_;
 
 	// 過去ログ関係
 	std::atomic_bool bRecording_;
