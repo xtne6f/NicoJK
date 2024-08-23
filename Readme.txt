@@ -7,7 +7,7 @@
 ニコニコ実況を表示するTVTest用のプラグインです。
 
 # このプラグインはjkcnsl( https://github.com/xtne6f/jkcnsl )アプリを介してニコニ
-# コのテレビ実況サーバ(live2.nicovideo.jp)と非公式に通信します。サーバに高負荷を
+# コのテレビ実況サーバ(live.nicovideo.jp)と非公式に通信します。サーバに高負荷を
 # 与えるような利用や改変をしないでください。
 
 
@@ -47,18 +47,16 @@ NicoJK.tvtpおよびNicoJK.iniをTVTestのPluginフォルダに入れてくだ�
 ■設定
 NicoJK.iniを確認してください。
 
-■避難所への接続について
-2024年6月のニコニコの障害にともない、tsukumi氏(https://github.com/tsukumijima/)
-がサーバー( https://nx-jikkyo.tsukumijima.net/ )を公開されたので、一般にこのよう
-な避難所への接続ができる設定キーを追加しました。
-具体的に上記サーバーに接続する場合はNicoJK.iniを
-
-refugeUri=wss://nx-jikkyo.tsukumijima.net/api/v1/channels/{jkID}/ws/watch
-
-などとしてください(2024年6月12日時点)。
-避難所の利用の可否などは各サーバーの管理者のルールに従ってください。
+2024年6月のニコニコの障害以降、NX-Jikkyo( https://nx-jikkyo.tsukumijima.net/ )を
+はじめとする有志サーバへの接続やニコニコ実況との同時接続に対応しています。
+2024年8月時点ではニコニコ実況が対応していない衛星系のチャンネルを中心にNX-Jikkyo
+がよく利用されているので、refugeUri と refugeMixing の2つの設定キーは設定してお
+くことをお勧めします。
 
 ■コメント投稿について
+※jkcnsl.exeにもログイン機能があります(jkcnslのReadmeを参照)。jkcnslのログイン機
+  能を使う場合は以下の作業は不要です。
+
 コメント投稿機能を有効にする場合は以下の作業を行ってください:
 ※DTV板の有志により、ブラウザに依存しないログインツールなども提供されています。
 1."sqlite3.exe"を用意
@@ -175,6 +173,12 @@ chatタグの左右に空白その他の文字を加えてはいけない(BOMも
 
 ■感謝
 過去ログ再生機能、コメント機能を実装していただいたxtne6f氏に感謝いたします。
+
+(ここからxtne6f追記)
+rutice氏版よりフォークさせてもらっているNicoJKプラグインですが、様々な方に協力頂
+きメンテナンスを続けられています。
+とりわけ近年tsukumi氏( https://github.com/tsukumijima )による情報提供をはじめと
+する貢献は大きく、ここに感謝申し上げます。
 N/実/勢アイコンは「ふい字」( https://hp.vector.co.jp/authors/VA039499/ )です。
 
 ■更新履歴
