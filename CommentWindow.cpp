@@ -197,14 +197,6 @@ bool CCommentWindow::Initialize(HINSTANCE hinst, bool *pbEnableOsdCompositor, bo
 			osdCompositor_.SetUpdateCallback(UpdateCallback, this);
 		}
 
-		OSVERSIONINFOEX vi;
-		vi.dwOSVersionInfoSize = sizeof(vi);
-		vi.dwMajorVersion = 6;
-		if (VerifyVersionInfo(&vi, VER_MAJORVERSION, VerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL))) {
-			// このAPIはVista以降に存在するがVistaの実装はバグを含むらしい(KB955688)ので注意
-			pfnUpdateLayeredWindowIndirect_ = reinterpret_cast<BOOL (WINAPI*)(HWND, const UPDATELAYEREDWINDOWINFO*)>(
-				GetProcAddress(GetModuleHandle(TEXT("user32.dll")), "UpdateLayeredWindowIndirect"));
-		}
 		bSse2Available_ = IsProcessorFeaturePresent(PF_XMMI64_INSTRUCTIONS_AVAILABLE) != FALSE;
 	}
 	return true;
@@ -212,7 +204,6 @@ bool CCommentWindow::Initialize(HINSTANCE hinst, bool *pbEnableOsdCompositor, bo
 
 void CCommentWindow::Finalize()
 {
-	pfnUpdateLayeredWindowIndirect_ = nullptr;
 	if (hinst_) {
         osdCompositor_.Uninitialize();
 		Gdiplus::GdiplusShutdown(gdiplusToken_);
@@ -224,7 +215,6 @@ void CCommentWindow::Finalize()
 CCommentWindow::CCommentWindow()
 	: hinst_(nullptr)
 	, gdiplusToken_(0)
-	, pfnUpdateLayeredWindowIndirect_(nullptr)
 	, bSse2Available_(false)
 	, hwnd_(nullptr)
 	, hwndParent_(nullptr)
@@ -658,7 +648,21 @@ void CCommentWindow::UpdateLayeredWindow()
 	BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
 	// ダーティ領域を指示すると閑散とした実況で実測25%強軽い
 	HDC hdc = GetDC(hwnd_);
-	UpdateLayeredWindow(hwnd_, hdc, nullptr, &sz, hdcWork_, &ptSrc, RGB(12, 12, 12), &blend, bAntiAlias_ ? ULW_ALPHA : ULW_COLORKEY, &rcDirty_);
+
+	UPDATELAYEREDWINDOWINFO info;
+	info.cbSize = sizeof(info);
+	info.hdcDst = hdc;
+	info.pptDst = nullptr;
+	info.psize = &sz;
+	info.hdcSrc = hdcWork_;
+	info.pptSrc = &ptSrc;
+	info.crKey = RGB(12, 12, 12);
+	info.pblend = &blend;
+	info.dwFlags = bAntiAlias_ ? ULW_ALPHA : ULW_COLORKEY;
+	info.prcDirty = &rcDirty_;
+	// このAPIはVista以降に存在するがVistaの実装はバグを含むらしい(KB955688)ので注意
+	::UpdateLayeredWindowIndirect(hwnd_, &info);
+
 	ReleaseDC(hwnd_, hdc);
 	SelectObject(hdcWork_, hbmOld);
 
@@ -736,27 +740,6 @@ void CCommentWindow::UpdateChat()
 		// 不透明度を適用(BLENDFUNCTIONでも可能だけどやたら重い)
 		ApplyOpacity(static_cast<DWORD*>(pBits_), width * (height - rcUnused_.bottom), opacity_, opacity_, bSse2Available_);
 		ApplyOpacity(static_cast<DWORD*>(pBits_) + width * (height - rcUnused_.top), width * rcUnused_.top, opacity_, opacity_, bSse2Available_);
-	}
-}
-
-BOOL CCommentWindow::UpdateLayeredWindow(HWND hWnd, HDC hdcDst, POINT *pptDst, SIZE *psize, HDC hdcSrc, POINT *pptSrc,
-                                         COLORREF crKey, BLENDFUNCTION *pblend, DWORD dwFlags, RECT *prcDirty)
-{
-	if (pfnUpdateLayeredWindowIndirect_) {
-		UPDATELAYEREDWINDOWINFO info;
-		info.cbSize = sizeof(info);
-		info.hdcDst = hdcDst;
-		info.pptDst = pptDst;
-		info.psize = psize;
-		info.hdcSrc = hdcSrc;
-		info.pptSrc = pptSrc;
-		info.crKey = crKey;
-		info.pblend = pblend;
-		info.dwFlags = dwFlags;
-		info.prcDirty = prcDirty;
-		return pfnUpdateLayeredWindowIndirect_(hWnd, &info);
-	} else {
-		return ::UpdateLayeredWindow(hWnd, hdcDst, pptDst, psize, hdcSrc, pptSrc, crKey, pblend, dwFlags & ~ULW_EX_NORESIZE);
 	}
 }
 

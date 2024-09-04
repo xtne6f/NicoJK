@@ -125,15 +125,12 @@ private:
 	void DrawingThread();
 	bool WaitForIdleDrawingThread();
 	void UpdateChat();
-	BOOL UpdateLayeredWindow(HWND hWnd, HDC hdcDst, POINT *pptDst, SIZE *psize, HDC hdcSrc, POINT *pptSrc,
-	                         COLORREF crKey, BLENDFUNCTION *pblend, DWORD dwFlags, RECT *prcDirty);
 	static BOOL CALLBACK UpdateCallback(void *pBits, const RECT *pSurfaceRect, int pitch, void *pClientData);
 	void DrawChat(Gdiplus::Graphics &g, int width, int height, RECT *prcUnused, RECT *prcUnusedWoShita, bool *pbHasFirstDrawShita);
 	static LRESULT CALLBACK WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 	HINSTANCE hinst_;
 	ULONG_PTR gdiplusToken_;
-	BOOL (WINAPI *pfnUpdateLayeredWindowIndirect_)(HWND hWnd, const UPDATELAYEREDWINDOWINFO *pULWInfo);
 	bool bSse2Available_;
 	HWND hwnd_;
 	HWND hwndParent_;
