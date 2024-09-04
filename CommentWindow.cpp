@@ -1048,12 +1048,7 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 					// テクスチャが見つからなかったので作る
 					TEXTURE t;
 					SetRect(&t.rc, minPos.x, minPos.y, minPos.x + entireDrawWith, minPos.y + entireDrawHeight);
-					t.colorB = it->colorB;
-					t.colorG = it->colorG;
-					t.colorR = it->colorR;
-					t.colorA = it->colorA;
-					t.bSmall = it->bSmall;
-					t.text = it->text;
+					t.AssignAttributes(*it);
 					pgTexture_->SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
 					pgTexture_->SetSmoothingMode(Gdiplus::SmoothingModeNone);
 					if (bOpaque) {

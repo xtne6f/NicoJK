@@ -107,6 +107,17 @@ private:
 			       c.bSmall == bSmall &&
 			       c.text == text;
 		}
+		void AssignAttributes(const CHAT &c) {
+			colorB = c.colorB;
+			colorG = c.colorG;
+			colorR = c.colorR;
+			colorA = c.colorA;
+			shadowColorB = c.shadowColorB;
+			shadowColorG = c.shadowColorG;
+			shadowColorR = c.shadowColorR;
+			bSmall = c.bSmall;
+			text = c.text;
+		}
 	};
 	bool AllocateWorkBitmap(int width, int height, bool *pbRealloc);
 	bool IsParentSized();
