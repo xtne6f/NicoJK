@@ -313,16 +313,6 @@ bool CNicoJK::TogglePlugin(bool bEnabled)
 				}
 				strncpy_s(cookie_, strCookie.c_str(), _TRUNCATE);
 			}
-			// 破棄のタイミングがややこしいので勢い窓のフォントはここで作る
-			if (!hForceFont_) {
-				LOGFONT lf = {};
-				HDC hdc = GetDC(nullptr);
-				lf.lfHeight = -(s_.forceFontSize * GetDeviceCaps(hdc, LOGPIXELSY) / 72);
-				ReleaseDC(nullptr, hdc);
-				lf.lfCharSet = SHIFTJIS_CHARSET;
-				_tcscpy_s(lf.lfFaceName, s_.forceFontName);
-				hForceFont_ = CreateFontIndirect(&lf);
-			}
 
 			// 勢い窓作成
 			if (hPanel_) {
@@ -1008,7 +998,7 @@ LRESULT CALLBACK CNicoJK::EventCallback(UINT Event, LPARAM lParam1, LPARAM lPara
 		// 色の設定が変化した
 		if (pThis->hPanel_ && pThis->hForce_) {
 			DeleteBrush(SetClassLongPtr(pThis->hForce_, GCLP_HBRBACKGROUND,
-				reinterpret_cast<LONG_PTR>(CreateSolidBrush(pThis->m_pApp->GetColor(L"ControlPanelMargin")))));
+				reinterpret_cast<LONG_PTR>(CreateSolidBrush(pThis->m_pApp->GetColor(L"PanelBack")))));
 			InvalidateRect(pThis->hForce_, nullptr, TRUE);
 		}
 		break;
@@ -1089,24 +1079,8 @@ LRESULT CALLBACK CNicoJK::EventCallback(UINT Event, LPARAM lParam1, LPARAM lPara
 				PostMessage(pThis->hForce_, WM_TIMER, TIMER_UPDATE, 0);
 				break;
 			case COMMAND_HIDE_COMMENT:
-					if (pThis->commentWindow_.GetOpacity() == 0 && pThis->m_pApp->GetPreview()) {
-						pThis->commentWindow_.ClearChat();
-						HWND hwnd = pThis->FindVideoContainer();
-						pThis->commentWindow_.Create(hwnd);
-						pThis->bHalfSkip_ = GetWindowHeight(hwnd) >= pThis->s_.halfSkipThreshold;
-						pThis->commentWindow_.AddChat(TEXT("(Comment ON)"), RGB(0, 0xFF, 0xFF), RGB(0, 0, 0), CCommentWindow::CHAT_POS_UE);
-						// 非表示前の不透明度を復元する
-						BYTE newOpacity = static_cast<BYTE>(pThis->s_.commentOpacity>>8);
-						pThis->commentWindow_.SetOpacity(newOpacity == 0 ? 255 : newOpacity);
-						pThis->m_pApp->SetPluginCommandState(COMMAND_HIDE_COMMENT, TVTest::COMMAND_ICON_STATE_CHECKED);
-					} else {
-						pThis->commentWindow_.Destroy();
-						// 8-15bitに非表示前の不透明度を記憶しておく
-						pThis->s_.commentOpacity = (pThis->s_.commentOpacity&~0xFF00) | (pThis->commentWindow_.GetOpacity()<<8);
-						pThis->commentWindow_.SetOpacity(0);
-						pThis->m_pApp->SetPluginCommandState(COMMAND_HIDE_COMMENT, 0);
-					}
-					SendDlgItemMessage(pThis->hForce_, IDC_SLIDER_OPACITY, TBM_SETPOS, TRUE, (pThis->commentWindow_.GetOpacity() * 10 + 254) / 255);
+				pThis->SetOpacity(pThis->hForce_, -1);
+				SendDlgItemMessage(pThis->hForce_, IDC_SLIDER_OPACITY, TBM_SETPOS, TRUE, (pThis->commentWindow_.GetOpacity() * 10 + 254) / 255);
 				break;
 			default:
 				if (COMMAND_FORWARD_A <= lParam1 && lParam1 < COMMAND_FORWARD_A + _countof(pThis->s_.forwardList)) {
@@ -1615,7 +1589,7 @@ static LRESULT CALLBACK TVTestPanelButtonProc(HWND hwnd, UINT uMsg, WPARAM wPara
 					hFontOld = SelectFont(hdc, hFont);
 				}
 				int oldBkMode = SetBkMode(hdc, TRANSPARENT);
-				pApp->ThemeDrawText(style, hdc, text, rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+				pApp->ThemeDrawText(style, hdc, text, rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 				SetBkMode(hdc, oldBkMode);
 				if (hFont) {
 					SelectFont(hdc, hFontOld);
@@ -1697,34 +1671,112 @@ LRESULT CALLBACK CNicoJK::ForceWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, L
 
 bool CNicoJK::CreateForceWindowItems(HWND hwnd)
 {
-	int padding = hPanel_ ? 0 : 4;
+	int dpi = m_pApp->GetDPIFromWindow(hwnd);
+	if (dpi == 0) {
+		dpi = 96;
+	}
+	if (!hForceFont_) {
+		// コントロールのフォントを生成
+		LOGFONT lf = {};
+		lf.lfHeight = -(s_.forceFontSize * dpi / 72);
+		lf.lfCharSet = SHIFTJIS_CHARSET;
+		_tcscpy_s(lf.lfFaceName, s_.forceFontName);
+		hForceFont_ = CreateFontIndirect(&lf);
+	}
+	int space = 3 * dpi / 96;
+	int padding = hPanel_ ? 0 : space;
+	int tabWidth = 56 * dpi / 96;
+	int checkBoxWidth = 48 * dpi / 96;
+	int sliderWidth = 64 * dpi / 96;
+	int upDownWidth = 18 * dpi / 96;
+	int height = 24 * dpi / 96;
+	int left = 0;
+
 	if (CreateWindowEx(0, TEXT("BUTTON"), TEXT("勢い"), WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | BS_PUSHLIKE,
-	        padding, padding, 60, 24, hwnd, reinterpret_cast<HMENU>(IDC_RADIO_FORCE), g_hinstDLL, nullptr) &&
+	        (left += padding), padding, tabWidth, height, hwnd, reinterpret_cast<HMENU>(IDC_RADIO_FORCE), g_hinstDLL, nullptr) &&
 	    CreateWindowEx(0, TEXT("BUTTON"), TEXT("ログ"), WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | BS_PUSHLIKE,
-	        padding + 60, padding, 60, 24, hwnd, reinterpret_cast<HMENU>(IDC_RADIO_LOG), g_hinstDLL, nullptr) &&
+	        (left += tabWidth), padding, tabWidth, height, hwnd, reinterpret_cast<HMENU>(IDC_RADIO_LOG), g_hinstDLL, nullptr) &&
 	    CreateWindowEx(0, TEXT("BUTTON"), TEXT("File"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-	        padding + 124, padding + 4, 50, 16, hwnd, reinterpret_cast<HMENU>(IDC_CHECK_SPECFILE), g_hinstDLL, nullptr) &&
+	        (left += tabWidth + space), padding + space, checkBoxWidth, height - space * 2, hwnd, reinterpret_cast<HMENU>(IDC_CHECK_SPECFILE), g_hinstDLL, nullptr) &&
 	    CreateWindowEx(0, TEXT("BUTTON"), TEXT("Rel"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-	        padding + 174, padding + 4, 50, 16, hwnd, reinterpret_cast<HMENU>(IDC_CHECK_RELATIVE), g_hinstDLL, nullptr) &&
-	    // TODO: (描画がとても面倒なので)スライダーはパネルでは表示しない
+	        (left += checkBoxWidth), padding + space, checkBoxWidth, height - space * 2, hwnd, reinterpret_cast<HMENU>(IDC_CHECK_RELATIVE), g_hinstDLL, nullptr) &&
+	    // パネルでは枠外の高さに置くことで実質的に非表示にする
 	    CreateWindowEx(0, TRACKBAR_CLASS, TEXT("不透明度"), WS_CHILD | WS_VISIBLE | TBS_BOTH | TBS_NOTICKS | TBS_TOOLTIPS,
-	        padding + 224, hPanel_ ? -100 : padding + 4, 64, 21, hwnd, reinterpret_cast<HMENU>(IDC_SLIDER_OPACITY), g_hinstDLL, nullptr) &&
+	        left + checkBoxWidth, hPanel_ ? -height : padding + space, sliderWidth, height - space, hwnd, reinterpret_cast<HMENU>(IDC_SLIDER_OPACITY), g_hinstDLL, nullptr) &&
+	    // パネルでは(描画がとても面倒なので)スライダーをボタン3つで代用
+	    CreateWindowEx(0, TEXT("BUTTON"), TEXT(""), WS_CHILD | WS_VISIBLE,
+	        (left += checkBoxWidth + space), hPanel_ ? padding + space : -height, upDownWidth, height - space * 2, hwnd, reinterpret_cast<HMENU>(IDC_BUTTON_OPACITY_DOWN), g_hinstDLL, nullptr) &&
+	    CreateWindowEx(0, TEXT("BUTTON"), TEXT(""), WS_CHILD | WS_VISIBLE,
+	        (left += upDownWidth), hPanel_ ? padding + space : -height, upDownWidth, height - space * 2, hwnd, reinterpret_cast<HMENU>(IDC_BUTTON_OPACITY_TOGGLE), g_hinstDLL, nullptr) &&
+	    CreateWindowEx(0, TEXT("BUTTON"), TEXT(""), WS_CHILD | WS_VISIBLE,
+	        left + upDownWidth, hPanel_ ? padding + space : -height, upDownWidth, height - space * 2, hwnd, reinterpret_cast<HMENU>(IDC_BUTTON_OPACITY_UP), g_hinstDLL, nullptr) &&
 	    CreateWindowEx(WS_EX_ACCEPTFILES, TEXT("LISTBOX"), nullptr, WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_BORDER | LBS_NOINTEGRALHEIGHT | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | LBS_NOTIFY,
-	        padding, padding + 24, 100, 100, hwnd, reinterpret_cast<HMENU>(IDC_FORCELIST), g_hinstDLL, nullptr) &&
+	        padding, padding + height, 100, 100, hwnd, reinterpret_cast<HMENU>(IDC_FORCELIST), g_hinstDLL, nullptr) &&
 	    CreateWindowEx(0, TEXT("COMBOBOX"), nullptr, WS_CHILD | WS_VISIBLE | CBS_DROPDOWN | CBS_AUTOHSCROLL | CBS_HASSTRINGS,
-	        padding, padding + 124, 100, 50, hwnd, reinterpret_cast<HMENU>(IDC_CB_POST), g_hinstDLL, nullptr))
+	        padding, padding + height + 100, 100, 50, hwnd, reinterpret_cast<HMENU>(IDC_CB_POST), g_hinstDLL, nullptr))
 	{
 		if (hForceFont_) {
 			SendDlgItemMessage(hwnd, IDC_RADIO_FORCE, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
 			SendDlgItemMessage(hwnd, IDC_RADIO_LOG, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
 			SendDlgItemMessage(hwnd, IDC_CHECK_SPECFILE, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
 			SendDlgItemMessage(hwnd, IDC_CHECK_RELATIVE, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
+			SendDlgItemMessage(hwnd, IDC_BUTTON_OPACITY_DOWN, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
+			SendDlgItemMessage(hwnd, IDC_BUTTON_OPACITY_UP, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
+			SendDlgItemMessage(hwnd, IDC_BUTTON_OPACITY_TOGGLE, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
 			SendDlgItemMessage(hwnd, IDC_FORCELIST, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
 			SendDlgItemMessage(hwnd, IDC_CB_POST, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
 		}
 		return true;
 	}
 	return false;
+}
+
+void CNicoJK::SetOpacity(HWND hwnd, int opacityOrToggle)
+{
+	BYTE opacity = commentWindow_.GetOpacity();
+	if (opacity == 0) {
+		bool bPreview = m_pApp->GetPreview();
+		if (opacityOrToggle >= 0) {
+			opacity = static_cast<BYTE>(opacityOrToggle);
+		} else if (bPreview) {
+			// 非表示前の不透明度を復元する
+			opacity = static_cast<BYTE>(s_.commentOpacity >> 8);
+			opacity = opacity == 0 ? 255 : opacity;
+		}
+		if (bPreview && opacity != 0) {
+			// 非表示->表示
+			commentWindow_.ClearChat();
+			HWND hwndContainer = FindVideoContainer();
+			commentWindow_.Create(hwndContainer);
+			bHalfSkip_ = GetWindowHeight(hwndContainer) >= s_.halfSkipThreshold;
+			if (opacityOrToggle < 0) {
+				commentWindow_.AddChat(TEXT("(Comment ON)"), RGB(0, 0xFF, 0xFF), RGB(0, 0, 0), CCommentWindow::CHAT_POS_UE);
+			}
+		}
+	} else {
+		if (opacityOrToggle >= 0) {
+			opacity = static_cast<BYTE>(opacityOrToggle);
+		} else {
+			// 8-15bitに非表示前の不透明度を記憶しておく
+			s_.commentOpacity = (s_.commentOpacity & ~0xFF00) | (opacity << 8);
+			opacity = 0;
+		}
+		if (opacity == 0) {
+			// 表示->非表示
+			commentWindow_.Destroy();
+		}
+	}
+	commentWindow_.SetOpacity(opacity);
+	m_pApp->SetPluginCommandState(COMMAND_HIDE_COMMENT, opacity != 0 ? TVTest::COMMAND_ICON_STATE_CHECKED : 0);
+	int level = (opacity * 10 + 254) / 255;
+	TCHAR text[2] = {};
+	text[0] = level < 10 ? static_cast<TCHAR>(TEXT('0') + level) : TEXT('F');
+	SetDlgItemText(hwnd, IDC_BUTTON_OPACITY_DOWN, level > 0 ? TEXT("◁") : TEXT(""));
+	SetDlgItemText(hwnd, IDC_BUTTON_OPACITY_UP, level < 10 ? TEXT("▷") : TEXT(""));
+	SetDlgItemText(hwnd, IDC_BUTTON_OPACITY_TOGGLE, text);
+	InvalidateRect(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_DOWN), nullptr, FALSE);
+	InvalidateRect(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_UP), nullptr, FALSE);
+	InvalidateRect(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_TOGGLE), nullptr, FALSE);
 }
 
 LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -1742,12 +1794,9 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			commentWindow_.SetCommentSize(s_.commentSize, s_.commentSizeMin, s_.commentSizeMax, s_.commentLineMargin);
 			commentWindow_.SetDisplayDuration(s_.commentDuration);
 			commentWindow_.SetDrawLineCount(s_.commentDrawLineCount);
-			commentWindow_.SetOpacity(static_cast<BYTE>(s_.commentOpacity));
-			m_pApp->SetPluginCommandState(COMMAND_HIDE_COMMENT, commentWindow_.GetOpacity() != 0 ? TVTest::COMMAND_ICON_STATE_CHECKED : 0);
+			commentWindow_.SetOpacity(0);
+			SetOpacity(hwnd, static_cast<BYTE>(s_.commentOpacity));
 			if (commentWindow_.GetOpacity() != 0 && m_pApp->GetPreview()) {
-				HWND hwndContainer = FindVideoContainer();
-				commentWindow_.Create(hwndContainer);
-				bHalfSkip_ = GetWindowHeight(hwndContainer) >= s_.halfSkipThreshold;
 				ProcessChatTag("<!--<chat date=\"0\" mail=\"cyan ue\" user_id=\"-\">(NicoJK ON)</chat>-->");
 			}
 			bDisplayLogList_ = (s_.hideForceWindow & 2) != 0;
@@ -1827,6 +1876,9 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				SetTVTestPanelItem(GetDlgItem(hwnd, IDC_RADIO_LOG), m_pApp, TVTestPanelButtonProc);
 				SetTVTestPanelItem(GetDlgItem(hwnd, IDC_CHECK_SPECFILE), m_pApp, TVTestPanelButtonProc);
 				SetTVTestPanelItem(GetDlgItem(hwnd, IDC_CHECK_RELATIVE), m_pApp, TVTestPanelButtonProc);
+				SetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_DOWN), m_pApp, TVTestPanelButtonProc);
+				SetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_UP), m_pApp, TVTestPanelButtonProc);
+				SetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_TOGGLE), m_pApp, TVTestPanelButtonProc);
 			}
 
 			if (s_.commentShareMode == 1 || s_.commentShareMode == 2 || s_.bCheckProcessRecording) {
@@ -1879,6 +1931,9 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				ResetTVTestPanelItem(GetDlgItem(hwnd, IDC_RADIO_LOG));
 				ResetTVTestPanelItem(GetDlgItem(hwnd, IDC_CHECK_SPECFILE));
 				ResetTVTestPanelItem(GetDlgItem(hwnd, IDC_CHECK_RELATIVE));
+				ResetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_DOWN));
+				ResetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_UP));
+				ResetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_TOGGLE));
 			}
 			// 投稿欄のサブクラス化を解除
 			COMBOBOXINFO cbi = {};
@@ -1964,17 +2019,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 		break;
 	case WM_HSCROLL:
 		if (reinterpret_cast<HWND>(lParam) == GetDlgItem(hwnd, IDC_SLIDER_OPACITY) && LOWORD(wParam) == SB_THUMBTRACK) {
-			BYTE newOpacity = static_cast<BYTE>(HIWORD(wParam) * 255 / 10);
-			if (commentWindow_.GetOpacity() == 0 && newOpacity != 0 && m_pApp->GetPreview()) {
-				commentWindow_.ClearChat();
-				HWND hwndContainer = FindVideoContainer();
-				commentWindow_.Create(hwndContainer);
-				bHalfSkip_ = GetWindowHeight(hwndContainer) >= s_.halfSkipThreshold;
-			} else if (commentWindow_.GetOpacity() != 0 && newOpacity == 0) {
-				commentWindow_.Destroy();
-			}
-			commentWindow_.SetOpacity(newOpacity);
-			m_pApp->SetPluginCommandState(COMMAND_HIDE_COMMENT, newOpacity != 0 ? TVTest::COMMAND_ICON_STATE_CHECKED : 0);
+			SetOpacity(hwnd, HIWORD(wParam) * 255 / 10);
 		}
 		break;
 	case WM_DRAWITEM:
@@ -2228,6 +2273,15 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					OutputMessageLog(text);
 				}
 			}
+			break;
+		case IDC_BUTTON_OPACITY_DOWN:
+			SetOpacity(hwnd, max((commentWindow_.GetOpacity() * 10 + 254) / 255 - 1, 0) * 255 / 10);
+			break;
+		case IDC_BUTTON_OPACITY_UP:
+			SetOpacity(hwnd, min((commentWindow_.GetOpacity() * 10 + 254) / 255 + 1, 10) * 255 / 10);
+			break;
+		case IDC_BUTTON_OPACITY_TOGGLE:
+			SetOpacity(hwnd, -1);
 			break;
 		}
 		break;
@@ -2861,6 +2915,9 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					ShowWindow(GetDlgItem(hwnd, IDC_CHECK_SPECFILE), swShow);
 					ShowWindow(GetDlgItem(hwnd, IDC_CHECK_RELATIVE), swShow);
 					ShowWindow(GetDlgItem(hwnd, IDC_SLIDER_OPACITY), swShow);
+					ShowWindow(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_DOWN), swShow);
+					ShowWindow(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_UP), swShow);
+					ShowWindow(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_TOGGLE), swShow);
 				}
 			}
 			SetWindowPos(hItem, nullptr, 0, 0, rcParent.right-rc.left*2, rcParent.bottom-rc.top-padding, SWP_NOMOVE | SWP_NOZORDER);

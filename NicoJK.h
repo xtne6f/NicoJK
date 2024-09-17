@@ -154,6 +154,7 @@ private:
 	static LRESULT CALLBACK PanelWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 	static LRESULT CALLBACK ForceWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 	bool CreateForceWindowItems(HWND hwnd);
+	void SetOpacity(HWND hwnd, int opacityOrToggle);
 	LRESULT ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 	static BOOL CALLBACK StreamCallback(BYTE *pData, void *pClientData);
 
