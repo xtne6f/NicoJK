@@ -340,13 +340,8 @@ bool CNicoJK::TogglePlugin(bool bEnabled)
 				ToggleStreamCallback(true);
 				// DWMの更新タイミングでTIMER_FORWARDを呼ぶスレッドを開始(Vista以降)
 				if (s_.timerInterval < 0) {
-					OSVERSIONINFOEX vi;
-					vi.dwOSVersionInfoSize = sizeof(vi);
-					vi.dwMajorVersion = 6;
 					BOOL bCompEnabled;
-					// ここで"dwmapi.dll"を遅延読み込みしていることに注意(つまりXPではDwm*()を踏んではいけない)
-					if (VerifyVersionInfo(&vi, VER_MAJORVERSION, VerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL)) &&
-					    SUCCEEDED(DwmIsCompositionEnabled(&bCompEnabled)) && bCompEnabled) {
+					if (SUCCEEDED(DwmIsCompositionEnabled(&bCompEnabled)) && bCompEnabled) {
 						bQuitSyncThread_ = false;
 						syncThread_ = std::thread([this]() { SyncThread(); });
 						SetThreadPriority(syncThread_.native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
