@@ -800,14 +800,16 @@ void CCommentWindow::DrawChat(Gdiplus::Graphics &g, int width, int height, RECT 
 		Gdiplus::REAL fontEm = static_cast<Gdiplus::REAL>(fontScale_ * height / actLineCount);
 		Gdiplus::REAL fontEmSmall = static_cast<Gdiplus::REAL>(fontSmallScale_ * height / actLineCount);
 		int fontStyle = fontStyle_;
-		Gdiplus::Font font(fontName_, fontEm * 0.75f, fontStyle);
-		Gdiplus::Font fontSmall(fontName_, fontEmSmall * 0.75f, fontStyle);
+		// 高DPI時の影響を打ち消すため
+		Gdiplus::REAL emPointsRatio = 72 / g.GetDpiY();
+		Gdiplus::Font font(fontName_, fontEm * emPointsRatio, fontStyle);
+		Gdiplus::Font fontSmall(fontName_, fontEmSmall * emPointsRatio, fontStyle);
 		// 複数行用フォント
-		Gdiplus::Font tmpFontMulti(fontNameMulti_, fontEm * 0.75f, fontStyle);
-		Gdiplus::Font tmpFontMultiSmall(fontNameMulti_, fontEmSmall * 0.75f, fontStyle);
+		Gdiplus::Font tmpFontMulti(fontNameMulti_, fontEm * emPointsRatio, fontStyle);
+		Gdiplus::Font tmpFontMultiSmall(fontNameMulti_, fontEmSmall * emPointsRatio, fontStyle);
 		// 絵文字用フォント
-		Gdiplus::Font tmpFontEmoji(fontNameEmoji_[0] ? fontNameEmoji_ : fontName_, fontEm * 0.75f, fontStyle);
-		Gdiplus::Font tmpFontEmojiSmall(fontNameEmoji_[0] ? fontNameEmoji_ : fontName_, fontEmSmall * 0.75f, fontStyle);
+		Gdiplus::Font tmpFontEmoji(fontNameEmoji_[0] ? fontNameEmoji_ : fontName_, fontEm * emPointsRatio, fontStyle);
+		Gdiplus::Font tmpFontEmojiSmall(fontNameEmoji_[0] ? fontNameEmoji_ : fontName_, fontEmSmall * emPointsRatio, fontStyle);
 
 		// 可能なら同じオブジェクトを参照しておく(いいことあるかもしれないので)
 		bool bSameMulti = !_tcscmp(fontName_, fontNameMulti_);
