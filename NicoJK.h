@@ -125,6 +125,7 @@ private:
 		bool SetPattern(LPCTSTR patt);
 	};
 	bool TogglePlugin(bool bEnabled);
+	void TogglePanelPopup();
 	void ToggleStreamCallback(bool bSet);
 	void SyncThread();
 	void CheckRecordingThread(DWORD processID);
@@ -151,7 +152,10 @@ private:
 	void OutputMessageLog(LPCTSTR text);
 	void GetPostComboBoxText(LPTSTR comm, size_t commSize, LPTSTR mail = nullptr, size_t mailSize = 0);
 	void ProcessLocalPost(LPCTSTR comm);
+	void RestorePopupWindowOpacity(HWND hwnd);
+	void RestorePopupWindowState(HWND hwnd);
 	static LRESULT CALLBACK PanelWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+	static LRESULT CALLBACK PanelPopupWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 	static LRESULT CALLBACK ForceWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 	bool CreateForceWindowItems(HWND hwnd);
 	void SetOpacity(HWND hwnd, int opacityOrToggle);
@@ -168,6 +172,7 @@ private:
 
 	// 勢い窓
 	HWND hPanel_;
+	HWND hPanelPopup_;
 	HWND hForce_;
 	HWND hForcePostEditBox_;
 	HBRUSH hbrForcePostEditBox_;

@@ -103,6 +103,7 @@ bool CNicoJK::RPL_ELEM::SetPattern(LPCTSTR patt)
 CNicoJK::CNicoJK()
 	: bDragAcceptFiles_(false)
 	, hPanel_(nullptr)
+	, hPanelPopup_(nullptr)
 	, hForce_(nullptr)
 	, hForcePostEditBox_(nullptr)
 	, hbrForcePostEditBox_(nullptr)
@@ -174,6 +175,15 @@ bool CNicoJK::Initialize()
 	wcPanel.hInstance = g_hinstDLL;
 	wcPanel.lpszClassName = TEXT("ru.jk.panel");
 	if (RegisterClassEx(&wcPanel) == 0) {
+		return false;
+	}
+	WNDCLASSEX wcPanelPopup = {};
+	wcPanelPopup.cbSize = sizeof(wcPanelPopup);
+	wcPanelPopup.style = 0;
+	wcPanelPopup.lpfnWndProc = PanelPopupWindowProc;
+	wcPanelPopup.hInstance = g_hinstDLL;
+	wcPanelPopup.lpszClassName = TEXT("ru.jk.panelpopup");
+	if (RegisterClassEx(&wcPanelPopup) == 0) {
 		return false;
 	}
 	WNDCLASSEX wc = {};
@@ -352,6 +362,9 @@ bool CNicoJK::TogglePlugin(bool bEnabled)
 		if (hForce_) {
 			DestroyWindow(hForce_);
 		}
+		if (hPanelPopup_) {
+			DestroyWindow(hPanelPopup_);
+		}
 		if (hForceFont_) {
 			DeleteFont(hForceFont_);
 			hForceFont_ = nullptr;
@@ -361,6 +374,19 @@ bool CNicoJK::TogglePlugin(bool bEnabled)
 			hbrForcePostEditBox_ = nullptr;
 		}
 		return true;
+	}
+}
+
+void CNicoJK::TogglePanelPopup()
+{
+	if (hPanelPopup_) {
+		// パネルに戻す
+		SendMessage(hPanelPopup_, WM_CLOSE, 0, 0);
+	} else if (hPanel_) {
+		// パネル項目をポップアップウィンドウ化
+		hPanelPopup_ = CreateWindowEx(WS_EX_WINDOWEDGE | WS_EX_TOOLWINDOW, TEXT("ru.jk.panelpopup"), TEXT("NicoJK - パネル"),
+		                              WS_CAPTION | WS_POPUP | WS_THICKFRAME | WS_SYSMENU,
+		                              CW_USEDEFAULT, CW_USEDEFAULT, 320, 240, nullptr, nullptr, g_hinstDLL, this);
 	}
 }
 
@@ -1017,8 +1043,8 @@ LRESULT CALLBACK CNicoJK::EventCallback(UINT Event, LPARAM lParam1, LPARAM lPara
 				pThis->bHalfSkip_ = GetWindowHeight(hwnd) >= pThis->s_.halfSkipThreshold;
 			}
 			// 全画面遷移時は隠れたほうが使い勝手がいいので呼ばない
-			if (!lParam1) {
-				SendMessage(pThis->hForce_, WM_SET_ZORDER, 0, 0);
+			if (pThis->hPanelPopup_ || !lParam1) {
+				PostMessage(pThis->hForce_, WM_SET_ZORDER, 0, 0);
 			}
 		}
 		break;
@@ -1381,9 +1407,9 @@ void CNicoJK::ProcessLocalPost(LPCTSTR comm)
 		OutputMessageLog(text);
 	} else if (!_tcsicmp(cmd, TEXT("fopa"))) {
 		s_.forceOpacity = 0 < nArg && nArg < 10 ? nArg * 255 / 10 : 255;
-		LONG style = GetWindowLong(hForce_, GWL_EXSTYLE);
-		SetWindowLong(hForce_, GWL_EXSTYLE, s_.forceOpacity == 255 ? style & ~WS_EX_LAYERED : style | WS_EX_LAYERED);
-		SetLayeredWindowAttributes(hForce_, 0, static_cast<BYTE>(s_.forceOpacity), LWA_ALPHA);
+		if (!hPanel_ || hPanelPopup_) {
+			RestorePopupWindowOpacity(hPanelPopup_ ? hPanelPopup_ : hForce_);
+		}
 	} else if (!_tcsicmp(cmd, TEXT("mask"))) {
 		s_.headerMask = 0 < nArg && nArg < INT_MAX ? nArg : 0;
 		TCHAR text[64];
@@ -1616,6 +1642,29 @@ static void ResetTVTestPanelItem(HWND hButton)
 	RemoveProp(hButton, TEXT("App"));
 }
 
+void CNicoJK::RestorePopupWindowOpacity(HWND hwnd)
+{
+	LONG style = GetWindowLong(hwnd, GWL_EXSTYLE);
+	SetWindowLong(hwnd, GWL_EXSTYLE, s_.forceOpacity == 255 ? style & ~WS_EX_LAYERED : style | WS_EX_LAYERED);
+	SetLayeredWindowAttributes(hwnd, 0, static_cast<BYTE>(s_.forceOpacity), LWA_ALPHA);
+}
+
+void CNicoJK::RestorePopupWindowState(HWND hwnd)
+{
+	// 位置を復元
+	HMONITOR hMon = MonitorFromRect(&s_.rcForce, MONITOR_DEFAULTTONEAREST);
+	MONITORINFO mi;
+	mi.cbSize = sizeof(MONITORINFO);
+	if (s_.rcForce.right <= s_.rcForce.left || !GetMonitorInfo(hMon, &mi) ||
+	    s_.rcForce.right < mi.rcMonitor.left + 20 || mi.rcMonitor.right - 20 < s_.rcForce.left ||
+	    s_.rcForce.bottom < mi.rcMonitor.top + 20 || mi.rcMonitor.bottom - 20 < s_.rcForce.top) {
+		GetWindowRect(hwnd, &s_.rcForce);
+	}
+	MoveWindow(hwnd, 0, 0, 64, 64, FALSE);
+	MoveWindow(hwnd, s_.rcForce.left, s_.rcForce.top, s_.rcForce.right - s_.rcForce.left, s_.rcForce.bottom - s_.rcForce.top, FALSE);
+	RestorePopupWindowOpacity(hwnd);
+}
+
 LRESULT CALLBACK CNicoJK::PanelWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	if (uMsg == WM_CREATE) {
@@ -1627,7 +1676,7 @@ LRESULT CALLBACK CNicoJK::PanelWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, L
 		case WM_CREATE:
 			SetProp(hwnd, TEXT("IsHide"), reinterpret_cast<HANDLE>('N'));
 			SetTimer(hwnd, 1, 5000, nullptr);
-			return TRUE;
+			return 0;
 		case WM_DESTROY:
 			RemoveProp(hwnd, TEXT("IsHide"));
 			pThis->hPanel_ = nullptr;
@@ -1648,12 +1697,61 @@ LRESULT CALLBACK CNicoJK::PanelWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, L
 			}
 			break;
 		case WM_SIZE:
-			if (pThis->hForce_) {
+			if (pThis->hForce_ && !pThis->hPanelPopup_) {
 				MoveWindow(pThis->hForce_, 0, 0, LOWORD(lParam), HIWORD(lParam), TRUE);
 			}
 			break;
 		default:
 			PostMessage(hwnd, WM_TIMER, 1, 0);
+			break;
+		}
+	}
+	return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+LRESULT CALLBACK CNicoJK::PanelPopupWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+	if (uMsg == WM_CREATE) {
+		SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(reinterpret_cast<LPCREATESTRUCT>(lParam)->lpCreateParams));
+	}
+	CNicoJK *pThis = reinterpret_cast<CNicoJK*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+	if (pThis) {
+		switch (uMsg) {
+		case WM_CREATE:
+			if (pThis->hForce_) {
+				// パネルウィンドウから奪う
+				if (!SetParent(pThis->hForce_, hwnd)) {
+					// 失敗
+					return -1;
+				}
+				PostMessage(pThis->hForce_, WM_SET_ZORDER, 0, 0);
+			}
+			ShowWindow(pThis->hPanel_, SW_HIDE);
+			pThis->RestorePopupWindowState(hwnd);
+			ShowWindow(hwnd, SW_SHOWNA);
+			return 0;
+		case WM_CLOSE:
+			if (pThis->hForce_) {
+				// パネルウィンドウに戻す
+				if (!SetParent(pThis->hForce_, pThis->hPanel_)) {
+					// 失敗
+					return 0;
+				}
+				RECT rc;
+				GetClientRect(pThis->hPanel_, &rc);
+				MoveWindow(pThis->hForce_, 0, 0, rc.right, rc.bottom, TRUE);
+			}
+			break;
+		case WM_DESTROY:
+			// 位置を保存
+			GetWindowRect(hwnd, &pThis->s_.rcForce);
+			ShowWindow(pThis->hPanel_, SW_SHOWNA);
+			pThis->hPanelPopup_ = nullptr;
+			break;
+		case WM_SIZE:
+			if (pThis->hForce_) {
+				MoveWindow(pThis->hForce_, 0, 0, LOWORD(lParam), HIWORD(lParam), TRUE);
+			}
 			break;
 		}
 	}
@@ -1688,7 +1786,7 @@ bool CNicoJK::CreateForceWindowItems(HWND hwnd)
 	int tabWidth = 56 * dpi / 96;
 	int checkBoxWidth = 48 * dpi / 96;
 	int sliderWidth = 64 * dpi / 96;
-	int upDownWidth = 18 * dpi / 96;
+	int buttonWidth = 18 * dpi / 96;
 	int height = 24 * dpi / 96;
 	int left = 0;
 
@@ -1705,11 +1803,13 @@ bool CNicoJK::CreateForceWindowItems(HWND hwnd)
 	        left + checkBoxWidth, hPanel_ ? -height : padding + space, sliderWidth, height - space, hwnd, reinterpret_cast<HMENU>(IDC_SLIDER_OPACITY), g_hinstDLL, nullptr) &&
 	    // パネルでは(描画がとても面倒なので)スライダーをボタン3つで代用
 	    CreateWindowEx(0, TEXT("BUTTON"), TEXT(""), WS_CHILD | WS_VISIBLE,
-	        (left += checkBoxWidth + space), hPanel_ ? padding + space : -height, upDownWidth, height - space * 2, hwnd, reinterpret_cast<HMENU>(IDC_BUTTON_OPACITY_DOWN), g_hinstDLL, nullptr) &&
+	        (left += checkBoxWidth + space), hPanel_ ? padding + space : -height, buttonWidth, height - space * 2, hwnd, reinterpret_cast<HMENU>(IDC_BUTTON_OPACITY_DOWN), g_hinstDLL, nullptr) &&
 	    CreateWindowEx(0, TEXT("BUTTON"), TEXT(""), WS_CHILD | WS_VISIBLE,
-	        (left += upDownWidth), hPanel_ ? padding + space : -height, upDownWidth, height - space * 2, hwnd, reinterpret_cast<HMENU>(IDC_BUTTON_OPACITY_TOGGLE), g_hinstDLL, nullptr) &&
+	        (left += buttonWidth), hPanel_ ? padding + space : -height, buttonWidth, height - space * 2, hwnd, reinterpret_cast<HMENU>(IDC_BUTTON_OPACITY_TOGGLE), g_hinstDLL, nullptr) &&
 	    CreateWindowEx(0, TEXT("BUTTON"), TEXT(""), WS_CHILD | WS_VISIBLE,
-	        left + upDownWidth, hPanel_ ? padding + space : -height, upDownWidth, height - space * 2, hwnd, reinterpret_cast<HMENU>(IDC_BUTTON_OPACITY_UP), g_hinstDLL, nullptr) &&
+	        (left += buttonWidth), hPanel_ ? padding + space : -height, buttonWidth, height - space * 2, hwnd, reinterpret_cast<HMENU>(IDC_BUTTON_OPACITY_UP), g_hinstDLL, nullptr) &&
+	    CreateWindowEx(0, TEXT("BUTTON"), TEXT("P"), WS_CHILD | WS_VISIBLE,
+	        left + buttonWidth, hPanel_ ? padding + space : -height, buttonWidth, height - space * 2, hwnd, reinterpret_cast<HMENU>(IDC_BUTTON_POPUP), g_hinstDLL, nullptr) &&
 	    CreateWindowEx(WS_EX_ACCEPTFILES, TEXT("LISTBOX"), nullptr, WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_BORDER | LBS_NOINTEGRALHEIGHT | LBS_HASSTRINGS | LBS_OWNERDRAWFIXED | LBS_NOTIFY,
 	        padding, padding + height, 100, 100, hwnd, reinterpret_cast<HMENU>(IDC_FORCELIST), g_hinstDLL, nullptr) &&
 	    CreateWindowEx(0, TEXT("COMBOBOX"), nullptr, WS_CHILD | WS_VISIBLE | CBS_DROPDOWN | CBS_AUTOHSCROLL | CBS_HASSTRINGS,
@@ -1723,6 +1823,7 @@ bool CNicoJK::CreateForceWindowItems(HWND hwnd)
 			SendDlgItemMessage(hwnd, IDC_BUTTON_OPACITY_DOWN, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
 			SendDlgItemMessage(hwnd, IDC_BUTTON_OPACITY_UP, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
 			SendDlgItemMessage(hwnd, IDC_BUTTON_OPACITY_TOGGLE, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
+			SendDlgItemMessage(hwnd, IDC_BUTTON_POPUP, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
 			SendDlgItemMessage(hwnd, IDC_FORCELIST, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
 			SendDlgItemMessage(hwnd, IDC_CB_POST, WM_SETFONT, reinterpret_cast<WPARAM>(hForceFont_), 0);
 		}
@@ -1829,24 +1930,12 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				// パネルウィンドウに連動
 				DeleteBrush(SetClassLongPtr(hwnd, GCLP_HBRBACKGROUND,
 					reinterpret_cast<LONG_PTR>(CreateSolidBrush(m_pApp->GetColor(L"PanelBack")))));
-				GetClientRect(hPanel_, &s_.rcForce);
+				RECT rc;
+				GetClientRect(hPanel_, &rc);
+				MoveWindow(hwnd, 0, 0, rc.right, rc.bottom, TRUE);
 			} else {
-				// 位置を復元
-				HMONITOR hMon = MonitorFromRect(&s_.rcForce, MONITOR_DEFAULTTONEAREST);
-				MONITORINFO mi;
-				mi.cbSize = sizeof(MONITORINFO);
-				if (s_.rcForce.right <= s_.rcForce.left || !GetMonitorInfo(hMon, &mi) ||
-				    s_.rcForce.right < mi.rcMonitor.left + 20 || mi.rcMonitor.right - 20 < s_.rcForce.left ||
-				    s_.rcForce.bottom < mi.rcMonitor.top + 20 || mi.rcMonitor.bottom - 20 < s_.rcForce.top) {
-					GetWindowRect(hwnd, &s_.rcForce);
-				}
+				RestorePopupWindowState(hwnd);
 			}
-			MoveWindow(hwnd, 0, 0, 64, 64, FALSE);
-			MoveWindow(hwnd, s_.rcForce.left, s_.rcForce.top, s_.rcForce.right - s_.rcForce.left, s_.rcForce.bottom - s_.rcForce.top, FALSE);
-			// 不透明度を復元
-			LONG style = GetWindowLong(hwnd, GWL_EXSTYLE);
-			SetWindowLong(hwnd, GWL_EXSTYLE, s_.forceOpacity == 255 ? style & ~WS_EX_LAYERED : style | WS_EX_LAYERED);
-			SetLayeredWindowAttributes(hwnd, 0, static_cast<BYTE>(s_.forceOpacity), LWA_ALPHA);
 
 			m_pApp->SetPluginCommandState(COMMAND_HIDE_FORCE, 0);
 			if (hPanel_ || (s_.hideForceWindow & 1) == 0) {
@@ -1879,6 +1968,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				SetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_DOWN), m_pApp, TVTestPanelButtonProc);
 				SetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_UP), m_pApp, TVTestPanelButtonProc);
 				SetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_TOGGLE), m_pApp, TVTestPanelButtonProc);
+				SetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_POPUP), m_pApp, TVTestPanelButtonProc);
 			}
 
 			if (s_.commentShareMode == 1 || s_.commentShareMode == 2 || s_.bCheckProcessRecording) {
@@ -1913,9 +2003,9 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					}
 				}
 			}
-			return TRUE;
+			return 0;
 		}
-		return FALSE;
+		return -1;
 	case WM_DESTROY:
 		{
 			// 録画状態をチェックするスレッドを終了
@@ -1934,6 +2024,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				ResetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_DOWN));
 				ResetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_UP));
 				ResetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_TOGGLE));
+				ResetTVTestPanelItem(GetDlgItem(hwnd, IDC_BUTTON_POPUP));
 			}
 			// 投稿欄のサブクラス化を解除
 			COMBOBOXINFO cbi = {};
@@ -1949,7 +2040,9 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			RemoveProp(hList, TEXT("DefProc"));
 
 			// 位置を保存
-			GetWindowRect(hwnd, &s_.rcForce);
+			if (!hPanel_ || hPanelPopup_) {
+				GetWindowRect(hPanelPopup_ ? hPanelPopup_ : hwnd, &s_.rcForce);
+			}
 			s_.commentOpacity = (s_.commentOpacity&~0xFF) | commentWindow_.GetOpacity();
 			s_.bSetRelative = SendDlgItemMessage(hwnd, IDC_CHECK_RELATIVE, BM_GETCHECK, 0, 0) == BST_CHECKED;
 			// ログファイルを閉じる
@@ -2283,6 +2376,9 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 		case IDC_BUTTON_OPACITY_TOGGLE:
 			SetOpacity(hwnd, -1);
 			break;
+		case IDC_BUTTON_POPUP:
+			TogglePanelPopup();
+			break;
 		}
 		break;
 	case WM_TIMER:
@@ -2514,7 +2610,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			break;
 		case TIMER_DONE_POSCHANGE:
 			KillTimer(hwnd, TIMER_DONE_POSCHANGE);
-			if (!m_pApp->GetFullscreen() && ((s_.hideForceWindow & 4) || (GetWindowLong(m_pApp->GetAppWindow(), GWL_STYLE) & WS_MAXIMIZE))) {
+			if (!m_pApp->GetFullscreen() && (hPanelPopup_ || (s_.hideForceWindow & 4) || (GetWindowLong(m_pApp->GetAppWindow(), GWL_STYLE) & WS_MAXIMIZE))) {
 				SendMessage(hwnd, WM_SET_ZORDER, 0, 0);
 			}
 			break;
@@ -2828,15 +2924,18 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 		}
 		return TRUE;
 	case WM_SET_ZORDER:
-		// 全画面や最大化時は前面のほうが都合がよいはず
-		if ((s_.hideForceWindow & 4) || m_pApp->GetFullscreen() || (GetWindowLong(m_pApp->GetAppWindow(), GWL_STYLE) & WS_MAXIMIZE)) {
-			// TVTestウィンドウの前面にもってくる
-			SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
-			SetWindowPos(hwnd, m_pApp->GetFullscreen() || m_pApp->GetAlwaysOnTop() ? HWND_TOPMOST : HWND_TOP,
-			             0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
-		} else {
-			// TVTestウィンドウの背面にもってくる
-			SetWindowPos(hwnd, m_pApp->GetAppWindow(), 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
+		if (!hPanel_ || hPanelPopup_) {
+			HWND hPopup = hPanelPopup_ ? hPanelPopup_ : hwnd;
+			// 全画面や最大化時は前面のほうが都合がよいはず
+			if (hPanelPopup_ || (s_.hideForceWindow & 4) || m_pApp->GetFullscreen() || (GetWindowLong(m_pApp->GetAppWindow(), GWL_STYLE) & WS_MAXIMIZE)) {
+				// TVTestウィンドウの前面にもってくる
+				SetWindowPos(hPopup, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
+				SetWindowPos(hPopup, m_pApp->GetFullscreen() || m_pApp->GetAlwaysOnTop() ? HWND_TOPMOST : HWND_TOP,
+				             0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
+			} else {
+				// TVTestウィンドウの背面にもってくる
+				SetWindowPos(hPopup, m_pApp->GetAppWindow(), 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
+			}
 		}
 		return TRUE;
 	case WM_POST_COMMENT:
@@ -2918,6 +3017,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					ShowWindow(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_DOWN), swShow);
 					ShowWindow(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_UP), swShow);
 					ShowWindow(GetDlgItem(hwnd, IDC_BUTTON_OPACITY_TOGGLE), swShow);
+					ShowWindow(GetDlgItem(hwnd, IDC_BUTTON_POPUP), swShow);
 				}
 			}
 			SetWindowPos(hItem, nullptr, 0, 0, rcParent.right-rc.left*2, rcParent.bottom-rc.top-padding, SWP_NOMOVE | SWP_NOZORDER);

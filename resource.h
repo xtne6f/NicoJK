@@ -17,3 +17,4 @@
 #define IDC_BUTTON_OPACITY_DOWN                 1007
 #define IDC_BUTTON_OPACITY_UP                   1008
 #define IDC_BUTTON_OPACITY_TOGGLE               1009
+#define IDC_BUTTON_POPUP                        1010
