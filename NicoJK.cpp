@@ -2962,9 +2962,8 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					}
 #ifdef _DEBUG
 					TCHAR debug[512];
-					int debugLen = MultiByteToWideChar(CP_UTF8, 0, rpl, -1, debug, _countof(debug) - 2);
-					debug[debugLen++] = TEXT('\n');
-					debug[debugLen] = TEXT('\0');
+					debug[MultiByteToWideChar(CP_UTF8, 0, rpl, -1, debug, _countof(debug) - 2)] = TEXT('\0');
+					_tcscat_s(debug, TEXT("\n"));
 					OutputDebugString(debug);
 #endif
 					it = itEnd + 1;
