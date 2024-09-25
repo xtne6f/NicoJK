@@ -21,22 +21,6 @@
 
 #pragma comment(lib, "dwmapi.lib")
 
-#ifdef _DEBUG
-#include <stdarg.h>
-inline void dprintf_real( const _TCHAR * fmt, ... )
-{
-  _TCHAR buf[1024];
-  va_list ap;
-  va_start(ap, fmt);
-  _vsntprintf_s(buf, 1024, fmt, ap);
-  va_end(ap);
-  OutputDebugString(buf);
-}
-#  define dprintf dprintf_real
-#else
-#  define dprintf __noop
-#endif
-
 // 通信用
 #define WMS_FORCE (WM_APP + 101)
 #define WMS_JK (WM_APP + 102)
@@ -2623,7 +2607,9 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 		}
 		break;
 	case WM_RESET_STREAM:
-		dprintf(TEXT("CNicoJK::ForceDialogProcMain() WM_RESET_STREAM\n")); // DEBUG
+#ifdef _DEBUG
+		OutputDebugString(TEXT("CNicoJK::ForceWindowProcMain() WM_RESET_STREAM\n"));
+#endif
 		{
 			lock_recursive_mutex lock(streamLock_);
 			llftTot_ = -1;
@@ -2817,7 +2803,9 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 						bool bRefuge = false;
 						if (ProcessChatTag(rpl, !bSpecFile_, static_cast<int>(min(max(-forwardOffset_, 0LL), 30000LL)), &bRefuge)) {
 							bool bReceivingPastChat = bRefuge ? bRefugeReceivingPastChat_ : bNicoReceivingPastChat_;
-							dprintf(TEXT("#%c#"), bReceivingPastChat ? TEXT('P') : TEXT('L')); // DEBUG
+#ifdef _DEBUG
+							OutputDebugString(bReceivingPastChat ? TEXT("#P#") : TEXT("#L#"));
+#endif
 							// ログの不整合を避けるため過去のコメントは保存しない
 							if (!bReceivingPastChat) {
 								WriteToLogfile(currentJK_, rpl);
@@ -2876,9 +2864,10 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					}
 #ifdef _DEBUG
 					TCHAR debug[512];
-					int debugLen = MultiByteToWideChar(CP_UTF8, 0, rpl, -1, debug, _countof(debug) - 1);
+					int debugLen = MultiByteToWideChar(CP_UTF8, 0, rpl, -1, debug, _countof(debug) - 2);
+					debug[debugLen++] = TEXT('\n');
 					debug[debugLen] = TEXT('\0');
-					dprintf(TEXT("%s\n"), debug); // DEBUG
+					OutputDebugString(debug);
 #endif
 					it = itEnd + 1;
 				}
@@ -2977,7 +2966,11 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					if (SendDlgItemMessage(hwnd, IDC_CB_POST, CB_SETEDITSEL, 0, MAKELPARAM(0, -1)) == TRUE) {
 						SendDlgItemMessage(hwnd, IDC_CB_POST, WM_CLEAR, 0, 0);
 					}
-					dprintf(TEXT("##POST##%s\n"), post); // DEBUG
+#ifdef _DEBUG
+					OutputDebugString(TEXT("##POST##"));
+					OutputDebugString(post);
+					OutputDebugString(TEXT("\n"));
+#endif
 				} else {
 					OutputMessageLog(TEXT("Error:コメントサーバに接続していません。"));
 				}
@@ -3080,7 +3073,7 @@ BOOL CALLBACK CNicoJK::StreamCallback(BYTE *pData, void *pClientData)
 		if (pid == pThis->pcrPid_) {
 			pThis->pcrPids_[0] = -1;
 		}
-		//dprintf(TEXT("CNicoJK::StreamCallback() PCR\n")); // DEBUG
+		//OutputDebugString(TEXT("CNicoJK::StreamCallback() PCR\n"));
 		lock_recursive_mutex lock(pThis->streamLock_);
 		DWORD tick = GetTickCount();
 		// 2秒以上PCRを取得できていない→ポーズから回復?
@@ -3163,7 +3156,9 @@ BOOL CALLBACK CNicoJK::StreamCallback(BYTE *pData, void *pClientData)
 				if (llft >= 0) {
 					// UTCに変換
 					llft += -32400000LL * FILETIME_MILLISECOND;
-					dprintf(TEXT("CNicoJK::StreamCallback() TOT\n")); // DEBUG
+#ifdef _DEBUG
+					OutputDebugString(TEXT("CNicoJK::StreamCallback() TOT\n"));
+#endif
 					lock_recursive_mutex lock(pThis->streamLock_);
 					// 時刻が変化したときだけ
 					if (llft != pThis->llftTot_) {
