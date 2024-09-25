@@ -21,15 +21,70 @@
 
 #pragma comment(lib, "dwmapi.lib")
 
-// 通信用
-#define WMS_FORCE (WM_APP + 101)
-#define WMS_JK (WM_APP + 102)
-#define WMS_TRANSFER (WM_APP + 103)
+namespace
+{
+// NicoJKから他プラグインに情報提供するメッセージ
+const int NICOJK_CURRENT_MSGVER = 1;
+const UINT WM_NICOJK_GET_MSGVER = WM_APP + 50;
+const UINT WM_NICOJK_GET_JKID = WM_APP + 51;
+const UINT WM_NICOJK_GET_JKID_TO_GET = WM_APP + 52;
+const UINT WM_NICOJK_OPEN_LOGFILE = WM_APP + 53;
+const int NICOJK_OPEN_FLAG_TXT = 0x01000000;
+const int NICOJK_OPEN_FLAG_JKL = 0x02000000;
+const int NICOJK_OPEN_FLAG_XML = 0x04000000;
+const int NICOJK_OPEN_FLAG_RELATIVE = 0x10000000;
+const int NICOJK_OPEN_FLAG_ABSOLUTE = 0x20000000;
 
-#define WM_RESET_STREAM (WM_APP + 105)
-#define WM_UPDATE_LIST (WM_APP + 106)
-#define WM_SET_ZORDER (WM_APP + 107)
-#define WM_POST_COMMENT (WM_APP + 108)
+#if 0 // NicoJKのウィンドウを探す関数(改変流用自由)
+BOOL CALLBACK FindNicoJKEnumProc(HWND hwnd, LPARAM lParam)
+{
+	TCHAR className[32];
+	if (GetClassName(hwnd, className, _countof(className)) && !_tcscmp(className, TEXT("ru.jk.force"))) {
+		*reinterpret_cast<HWND*>(lParam) = hwnd;
+		return FALSE;
+	}
+	return TRUE;
+}
+
+BOOL CALLBACK FindNicoJKTopEnumProc(HWND hwnd, LPARAM lParam)
+{
+	std::pair<HWND, DWORD> &params = *reinterpret_cast<std::pair<HWND, DWORD>*>(lParam);
+	DWORD processID = 0;
+	GetWindowThreadProcessId(hwnd, &processID);
+	if (processID == params.second && FindNicoJKEnumProc(hwnd, reinterpret_cast<LPARAM>(&params.first))) {
+		EnumChildWindows(hwnd, FindNicoJKEnumProc, reinterpret_cast<LPARAM>(&params.first));
+	}
+	return params.first == nullptr;
+}
+
+BOOL CALLBACK FindNicoJKThreadTopEnumProc(HWND hwnd, LPARAM lParam)
+{
+	if (FindNicoJKEnumProc(hwnd, lParam)) {
+		EnumChildWindows(hwnd, FindNicoJKEnumProc, lParam);
+	}
+	return *reinterpret_cast<HWND*>(lParam) == nullptr;
+}
+
+HWND FindNicoJKWindow(DWORD processID)
+{
+	std::pair<HWND, DWORD> params(nullptr, processID);
+	EnumWindows(FindNicoJKTopEnumProc, reinterpret_cast<LPARAM>(&params)); // Call from another process
+	return params.first;
+	//HWND hwnd = nullptr;
+	//EnumThreadWindows(GetCurrentThreadId(), FindNicoJKThreadTopEnumProc, reinterpret_cast<LPARAM>(&hwnd)); // Call from plugin
+	//return hwnd;
+}
+#endif
+
+// 通信用
+const UINT WMS_FORCE = WM_APP + 101;
+const UINT WMS_JK = WM_APP + 102;
+const UINT WMS_TRANSFER = WM_APP + 103;
+
+const UINT WM_RESET_STREAM = WM_APP + 105;
+const UINT WM_UPDATE_LIST = WM_APP + 106;
+const UINT WM_SET_ZORDER = WM_APP + 107;
+const UINT WM_POST_COMMENT = WM_APP + 108;
 
 enum {
 	TIMER_UPDATE = 1,
@@ -48,6 +103,7 @@ enum {
 	COMMAND_HIDE_COMMENT,
 	COMMAND_FORWARD_A,
 };
+}
 
 void CNicoJK::RPL_ELEM::SetEnabled(bool b)
 {
@@ -2606,6 +2662,48 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			break;
 		}
 		break;
+	case WM_NICOJK_GET_MSGVER:
+		return NICOJK_CURRENT_MSGVER;
+	case WM_NICOJK_GET_JKID:
+		return currentJK_;
+	case WM_NICOJK_GET_JKID_TO_GET:
+		return currentJKToGet_;
+	case WM_NICOJK_OPEN_LOGFILE:
+		if ((lParam & NICOJK_OPEN_FLAG_TXT) || (lParam & NICOJK_OPEN_FLAG_JKL) || (lParam & NICOJK_OPEN_FLAG_XML)) {
+			// プラグインフォルダからの相対パスを {lParamから3文字}_{wParam数値}.{拡張子} の形式で構築する
+			// (ポインタを使うとプロセス外から扱えないのであえてこのようにしている)
+			TCHAR name[32] = {};
+			name[0] = static_cast<char>(lParam);
+			name[1] = static_cast<char>(lParam >> 8);
+			name[2] = static_cast<char>(lParam >> 16);
+			size_t len = _tcslen(name);
+			_stprintf_s(name + len, _countof(name) - len, TEXT("_%u%s"), static_cast<UINT>(wParam),
+			            lParam & NICOJK_OPEN_FLAG_JKL ? TEXT(".jkl") :
+			            lParam & NICOJK_OPEN_FLAG_XML ? TEXT(".xml") : TEXT(".txt"));
+			size_t lastSep = iniFileName_.find_last_of(TEXT("/\\"));
+			if (lastSep != tstring::npos) {
+				tstring path = iniFileName_.substr(0, lastSep + 1) + name;
+				if (bSpecFile_) {
+					ReadFromLogfile(-1);
+					DeleteFile(tmpSpecFileName_.c_str());
+					bSpecFile_ = false;
+				}
+				SendDlgItemMessage(hwnd, IDC_CHECK_SPECFILE, BM_SETCHECK, BST_UNCHECKED, 0);
+				if ((lParam & NICOJK_OPEN_FLAG_RELATIVE) || (lParam & NICOJK_OPEN_FLAG_ABSOLUTE)) {
+					SendDlgItemMessage(hwnd, IDC_CHECK_RELATIVE, BM_SETCHECK, lParam & NICOJK_OPEN_FLAG_RELATIVE ? BST_CHECKED : BST_UNCHECKED, 0);
+				}
+				LONGLONG llft = 0;
+				bool bRel = SendDlgItemMessage(hwnd, IDC_CHECK_RELATIVE, BM_GETCHECK, 0, 0) == BST_CHECKED;
+				if ((!bRel || (llft = GetCurrentTot()) >= 0) &&
+				    ImportLogfile(path.c_str(), tmpSpecFileName_.c_str(), bRel ? FileTimeToUnixTime(llft) + 2 : 0)) {
+					logReader_.ResetCheckInterval();
+					bSpecFile_ = true;
+					SendDlgItemMessage(hwnd, IDC_CHECK_SPECFILE, BM_SETCHECK, BST_CHECKED, 0);
+					return TRUE;
+				}
+			}
+		}
+		return FALSE;
 	case WM_RESET_STREAM:
 #ifdef _DEBUG
 		OutputDebugString(TEXT("CNicoJK::ForceWindowProcMain() WM_RESET_STREAM\n"));
