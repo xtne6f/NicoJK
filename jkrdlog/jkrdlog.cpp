@@ -1,13 +1,20 @@
-﻿#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <stdio.h>
-#include <tchar.h>
+﻿#include "../ToolsCommon.h"
 #include "../LogReader.h"
 #include "../NetworkServiceIDTable.h"
 #include <algorithm>
-#include <string>
+#include <chrono>
+#ifndef _WIN32
+#include <thread>
+#ifndef NICOJK_LOG_DIR
+#define NICOJK_LOG_DIR "/var/local/nicojk"
+#endif
+#endif
 
+#ifdef _WIN32
 int _tmain(int argc, TCHAR **argv)
+#else
+int main(int argc, char **argv)
+#endif
 {
 	int readRatePerMille = 0;
 	int jkID = 0;
@@ -15,7 +22,7 @@ int _tmain(int argc, TCHAR **argv)
 	unsigned int tmReadTo = 0;
 
 	if (argc < 4) {
-		_ftprintf(stderr, TEXT("Usage: jkrdlog [-r readrate] jkid_or_ns{nid<<16+sid} from_unixtime to_unixtime_or_0.\n"));
+		fprintf(stderr, "Usage: jkrdlog [-r readrate] jkid_or_ns{nid<<16+sid} from_unixtime to_unixtime_or_0.\n");
 		return 2;
 	}
 	for (int i = 1; i < argc; ++i) {
@@ -38,9 +45,10 @@ int _tmain(int argc, TCHAR **argv)
 				e.ntsID = _tcstoul(argv[i] + 2, nullptr, 10);
 				// 上位と下位をひっくり返しているので補正
 				e.ntsID = (e.ntsID << 16) | (e.ntsID >> 16);
-				const NETWORK_SERVICE_ID_ELEM *p = std::lower_bound(DEFAULT_NTSID_TABLE, DEFAULT_NTSID_TABLE + _countof(DEFAULT_NTSID_TABLE), e,
+				const NETWORK_SERVICE_ID_ELEM *pEnd = DEFAULT_NTSID_TABLE + sizeof(DEFAULT_NTSID_TABLE) / sizeof(DEFAULT_NTSID_TABLE[0]);
+				const NETWORK_SERVICE_ID_ELEM *p = std::lower_bound(DEFAULT_NTSID_TABLE, pEnd, e,
 					[](const NETWORK_SERVICE_ID_ELEM &a, const NETWORK_SERVICE_ID_ELEM &b) { return a.ntsID < b.ntsID; });
-				if (p != DEFAULT_NTSID_TABLE + _countof(DEFAULT_NTSID_TABLE) && p->ntsID == e.ntsID) {
+				if (p != pEnd && p->ntsID == e.ntsID) {
 					jkID = p->jkID;
 				}
 			} else if (argv[i][0] == TEXT('j') && argv[i][1] == TEXT('k')) {
@@ -55,47 +63,48 @@ int _tmain(int argc, TCHAR **argv)
 			bInvalid = (tmReadTo == 0 && readRatePerMille <= 0) || (tmReadTo != 0 && tmReadTo < tmReadFrom);
 		}
 		if (bInvalid) {
-			_ftprintf(stderr, TEXT("Error: Argument %d is invalid.\n"), i);
+			fprintf(stderr, "Error: Argument %d is invalid.\n", i);
 			return 1;
 		}
 	}
 	if (jkID <= 0) {
-		_ftprintf(stderr, TEXT("Error: Not enough arguments.\n"));
+		fprintf(stderr, "Error: Not enough arguments.\n");
 		return 1;
 	}
 
+	CLogReader logReader;
+#ifdef _WIN32
 	TCHAR dir[MAX_PATH];
 	DWORD nRet = GetModuleFileName(nullptr, dir, _countof(dir));
 	if (nRet && nRet < _countof(dir)) {
-		for (size_t i = _tcslen(dir); i > 0 && !_tcschr(TEXT("/\\"), dir[i - 1]); ) {
+		size_t i = _tcslen(dir);
+		while (i > 0 && !_tcschr(TEXT("/\\"), dir[i - 1])) {
 			dir[--i] = TEXT('\0');
 		}
-		if (dir[0]) {
-			dir[_tcslen(dir) - 1] = TEXT('\0');
+		if (i > 0) {
+			dir[--i] = TEXT('\0');
 		}
 	} else {
 		dir[0] = TEXT('\0');
 	}
 	if (!dir[0]) {
-		_ftprintf(stderr, TEXT("Error: Unexpected.\n"));
+		fprintf(stderr, "Error: Unexpected.\n");
 		return 1;
 	}
-
-	CLogReader logReader;
 	logReader.SetLogDirectory(dir);
+#else
+	logReader.SetLogDirectory(NICOJK_LOG_DIR);
+#endif
 	logReader.ResetCheckInterval();
 
-	LARGE_INTEGER liFreq = {};
-	LARGE_INTEGER liBase = {};
+	std::chrono::high_resolution_clock::time_point baseTime;
 	if (readRatePerMille > 0) {
 		// 毎秒速やかに出力するためバッファリングしない
-		if (setvbuf(stdout, nullptr, _IONBF, 0) != 0 ||
-		    !QueryPerformanceFrequency(&liFreq) ||
-		    !QueryPerformanceCounter(&liBase)) {
-			_ftprintf(stderr, TEXT("Error: Unexpected.\n"));
+		if (setvbuf(stdout, nullptr, _IONBF, 0) != 0) {
+			fprintf(stderr, "Error: Unexpected.\n");
 			return 1;
 		}
-		liFreq.QuadPart *= 1000;
+		baseTime = std::chrono::high_resolution_clock::now();
 	} else {
 		// ウェイト無しなのでファイルチェックを間引かない
 		logReader.SetCheckIntervalMsec(0);
@@ -114,8 +123,13 @@ int _tmain(int argc, TCHAR **argv)
 			textBuf.clear();
 			const char *text;
 			while (logReader.Read(jkID, [&buf, &textBuf](LPCTSTR message) {
+#ifdef _WIN32
 				char utf8[512];
-				if (WideCharToMultiByte(CP_UTF8, 0, message, -1, utf8, sizeof(utf8), nullptr, nullptr) != 0) {
+				if (WideCharToMultiByte(CP_UTF8, 0, message, -1, utf8, sizeof(utf8), nullptr, nullptr) != 0)
+#else
+				const char *utf8 = message;
+#endif
+				{
 					buf += "<!-- M=";
 					buf += utf8;
 					buf += " -->\n";
@@ -153,8 +167,13 @@ int _tmain(int argc, TCHAR **argv)
 		}
 		// 80文字のヘッダをつける
 		char head[77];
-		int i = sprintf_s(head, "<!-- J=%d;T=%u;L=%d;N=%d", jkID, tm, static_cast<int>(buf.size()) - 80,
-		                  static_cast<int>(std::count(buf.begin(), buf.end(), '\n')) - 1);
+#ifdef _WIN32
+		int i = sprintf_s(
+#else
+		int i = sprintf(
+#endif
+			head, "<!-- J=%d;T=%u;L=%d;N=%d", jkID, tm, static_cast<int>(buf.size()) - 80,
+			static_cast<int>(std::count(buf.begin(), buf.end(), '\n')) - 1);
 		buf.replace(0, i, head);
 		if (fputs(buf.c_str(), stdout) < 0) {
 			break;
@@ -169,7 +188,12 @@ int _tmain(int argc, TCHAR **argv)
 			for (++tm; tm < tmJumpTo; ++tm, ++tmReading) {
 				buf.assign(76, ' ');
 				buf += "-->\n";
-				i = sprintf_s(head, "<!-- J=%d;T=%u;L=0;N=0", jkID, tm);
+#ifdef _WIN32
+				i = sprintf_s(
+#else
+				i = sprintf(
+#endif
+					head, "<!-- J=%d;T=%u;L=0;N=0", jkID, tm);
 				buf.replace(0, i, head);
 				if (fputs(buf.c_str(), stdout) < 0) {
 					bError = true;
@@ -183,15 +207,15 @@ int _tmain(int argc, TCHAR **argv)
 		}
 		if (readRatePerMille > 0) {
 			for (;;) {
-				LARGE_INTEGER liNow;
-				if (!QueryPerformanceCounter(&liNow)) {
-					_ftprintf(stderr, TEXT("Error: Unexpected.\n"));
-					return 1;
-				}
-				if ((tm - tmReadFrom) - (liNow.QuadPart - liBase.QuadPart) * readRatePerMille / liFreq.QuadPart < 0) {
+				auto elapsedMsec = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - baseTime);
+				if ((tm - tmReadFrom) - elapsedMsec.count() * readRatePerMille / 1000000 < 0) {
 					break;
 				}
+#ifdef _WIN32
 				Sleep(100);
+#else
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+#endif
 			}
 		}
 	}

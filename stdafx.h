@@ -30,3 +30,7 @@ using std::min;
 using std::max;
 
 typedef std::basic_string<TCHAR> tstring;
+
+struct fclose_deleter {
+	void operator()(FILE *fp) { fclose(fp); }
+};

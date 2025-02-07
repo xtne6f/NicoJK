@@ -1,6 +1,5 @@
 ﻿#pragma once
 
-#include <stdio.h>
 #include <memory>
 
 // マルチバイトテキストファイル読み込み
@@ -17,9 +16,11 @@ public:
 	size_t ReadLastLine(char *text, size_t textMax);
 	LONGLONG Seek(LONGLONG scale);
 	bool IsOpen() const { return fp_ || zipf_; }
+#ifdef _WIN32
 	static void *TfopenSFileFuncForZlib(void *opaque, const void *filename, int mode);
+#endif
 private:
-	std::unique_ptr<FILE, decltype(&fclose)> fp_;
+	std::unique_ptr<FILE, fclose_deleter> fp_;
 	std::unique_ptr<void, int(*)(void *)> zipf_;
 	bool bEof_;
 	char buf_[BUF_SIZE];

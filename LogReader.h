@@ -1,8 +1,8 @@
 ﻿#pragma once
 
 #include "TextFileReader.h"
+#include <chrono>
 #include <functional>
-#include <string>
 #include <vector>
 
 // ログファイル読み込み
@@ -33,7 +33,7 @@ private:
 		char name[16];
 	};
 	struct FIND_LOGFILE_CACHE {
-		std::basic_string<TCHAR> path;
+		tstring path;
 		std::vector<FIND_LOGFILE_ELEM> list;
 		size_t index;
 	};
@@ -47,9 +47,9 @@ private:
 	bool bReadLogTextNext_;
 	unsigned int tmReadLogText_;
 	DWORD checkInterval_;
-	DWORD checkTick_;
+	std::chrono::steady_clock::time_point checkTick_;
 	FIND_LOGFILE_CACHE findZippedLogfileCache_;
 	unsigned int tmZippedLogfileCachedLast_;
-	std::basic_string<TCHAR> jk0LogfilePath_;
-	std::basic_string<TCHAR> logDirectory_;
+	tstring jk0LogfilePath_;
+	tstring logDirectory_;
 };

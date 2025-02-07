@@ -12,5 +12,6 @@
 !*.vcxproj
 !*.vcxproj.filters
 !.gitignore
+!Makefile
 !README
 *.FileListAbsolute.txt

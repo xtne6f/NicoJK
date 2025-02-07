@@ -1,8 +1,6 @@
-﻿#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+﻿#include "ToolsCommon.h"
 #include <memory>
 #include <regex>
-#include <tchar.h>
 #include "ImportLogUtil.h"
 
 namespace
@@ -12,9 +10,14 @@ bool TxtToLocalFormat(LPCTSTR srcPath, const std::function<FILE *(unsigned int &
 {
 	FILE *fp;
 	size_t len = _tcslen(srcPath);
-	if (len >= 5 && !_tcschr(TEXT("/\\"), srcPath[len - 5]) && !_tcsicmp(&srcPath[len - 4], TEXT(".txt")) &&
-	    !_tfopen_s(&fp, srcPath, TEXT("rN"))) {
-		std::unique_ptr<FILE, decltype(&fclose)> fpSrc(fp, fclose);
+	if (len >= 5 && !ComparePath(&srcPath[len - 4], TEXT(".txt")) && srcPath[len - 5] != TEXT('/') &&
+#ifdef _WIN32
+	    srcPath[len - 5] != TEXT('\\') && !_tfopen_s(&fp, srcPath, TEXT("rN"))
+#else
+	    !!(fp = fopen(srcPath, "r"))
+#endif
+	    ) {
+		std::unique_ptr<FILE, fclose_deleter> fpSrc(fp);
 		const std::regex re("<chat(?= )[^>]*? date=\"(\\d+)\"[^]*\n");
 		std::cmatch m;
 		char buf[8192];
@@ -28,7 +31,9 @@ bool TxtToLocalFormat(LPCTSTR srcPath, const std::function<FILE *(unsigned int &
 				if (fp) {
 					fwrite(buf, 1, m[1].first - buf, fp);
 					fprintf(fp, "%u", tm);
-					fputs(m[1].second, fp);
+					fwrite(m[1].second, 1, m[0].second - m[1].second - (*(m[0].second - 2) == '\r' ? 2 : 1), fp);
+					// 必ずCRLF
+					fputs("\r\n", fp);
 				}
 			}
 		}
@@ -55,7 +60,8 @@ void WriteChatTag(FILE *fp, const std::cmatch &m, unsigned int tm)
 		}
 	}
 	fwrite(p, 1, len, fp);
-	fputs("\n", fp);
+	// 必ずCRLF
+	fputs("\r\n", fp);
 }
 
 // JikkyoRec.jklをローカル形式に変換する
@@ -63,9 +69,14 @@ bool JklToLocalFormat(LPCTSTR srcPath, const std::function<FILE *(unsigned int &
 {
 	FILE *fp;
 	size_t len = _tcslen(srcPath);
-	if (len >= 5 && !_tcschr(TEXT("/\\"), srcPath[len - 5]) && !_tcsicmp(&srcPath[len - 4], TEXT(".jkl")) &&
-	    !_tfopen_s(&fp, srcPath, TEXT("rbN"))) {
-		std::unique_ptr<FILE, decltype(&fclose)> fpSrc(fp, fclose);
+	if (len >= 5 && !ComparePath(&srcPath[len - 4], TEXT(".jkl")) && srcPath[len - 5] != TEXT('/') &&
+#ifdef _WIN32
+	    srcPath[len - 5] != TEXT('\\') && !_tfopen_s(&fp, srcPath, TEXT("rbN"))
+#else
+	    !!(fp = fopen(srcPath, "r"))
+#endif
+	    ) {
+		std::unique_ptr<FILE, fclose_deleter> fpSrc(fp);
 		char buf[8192];
 		if (fread(buf, 1, 10, fpSrc.get()) == 10 && !memcmp(buf, "<JikkyoRec", 10)) {
 			// 空行まで読み飛ばす
@@ -74,7 +85,7 @@ bool JklToLocalFormat(LPCTSTR srcPath, const std::function<FILE *(unsigned int &
 
 			const std::regex re("<chat(?= )[^>]*? date=\"(\\d+)\"[^]*?(?:/>|</chat>)");
 			std::cmatch m;
-			int bufLen = 0;
+			size_t bufLen = 0;
 			while ((c = fgetc(fpSrc.get())) != EOF) {
 				if (bufLen >= sizeof(buf)) {
 					bufLen = 0;
@@ -103,9 +114,14 @@ bool XmlToLocalFormat(LPCTSTR srcPath, const std::function<FILE *(unsigned int &
 {
 	FILE *fp;
 	size_t len = _tcslen(srcPath);
-	if (len >= 5 && !_tcschr(TEXT("/\\"), srcPath[len - 5]) && !_tcsicmp(&srcPath[len - 4], TEXT(".xml")) &&
-	    !_tfopen_s(&fp, srcPath, TEXT("rN"))) {
-		std::unique_ptr<FILE, decltype(&fclose)> fpSrc(fp, fclose);
+	if (len >= 5 && !ComparePath(&srcPath[len - 4], TEXT(".xml")) && srcPath[len - 5] != TEXT('/') &&
+#ifdef _WIN32
+	    srcPath[len - 5] != TEXT('\\') && !_tfopen_s(&fp, srcPath, TEXT("rN"))
+#else
+	    !!(fp = fopen(srcPath, "r"))
+#endif
+	    ) {
+		std::unique_ptr<FILE, fclose_deleter> fpSrc(fp);
 		char buf[8192];
 		if (fgets(buf, sizeof(buf), fpSrc.get()) && strstr(buf, "<?xml")) {
 			const std::regex re("<chat(?= )[^>]*? date=\"(\\d+)\"[^]*?(?:/>|</chat>)");
@@ -142,15 +158,19 @@ bool ImportLogfile(LPCTSTR srcPath, const std::function<FILE *(unsigned int &)> 
 
 bool ImportLogfile(LPCTSTR srcPath, LPCTSTR destPath, unsigned int tmNew)
 {
-	std::unique_ptr<FILE, decltype(&fclose)> fpDest(nullptr, fclose);
+	std::unique_ptr<FILE, fclose_deleter> fpDest;
 	unsigned int tmOld = 0;
 	bool bFirst = true;
 	bool bRet = ImportLogfile(srcPath, [=, &fpDest, &tmOld, &bFirst](unsigned int &tm) -> FILE * {
 		if (bFirst) {
+#ifdef _WIN32
 			FILE *fp;
-			if (!_tfopen_s(&fp, destPath, TEXT("wN"))) {
+			if (!_tfopen_s(&fp, destPath, TEXT("wbN"))) {
 				fpDest.reset(fp);
 			}
+#else
+			fpDest.reset(fopen(destPath, "w"));
+#endif
 			tmOld = tm;
 			bFirst = false;
 		}

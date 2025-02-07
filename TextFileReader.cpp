@@ -1,17 +1,15 @@
-﻿#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#include <tchar.h>
-#include "TextFileReader.h"
-#include "unzip.h"
+﻿#include "ToolsCommon.h"
+#ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
 #include <share.h>
+#endif
+#include "TextFileReader.h"
+#include "zlib1/unzip.h"
 #include <algorithm>
 
 CTextFileReader::CTextFileReader()
-	: fp_(nullptr, fclose)
-	, zipf_(nullptr, unzClose)
+	: zipf_(nullptr, unzClose)
 	, bEof_(false)
 {
 	buf_[0] = '\0';
@@ -20,6 +18,7 @@ CTextFileReader::CTextFileReader()
 bool CTextFileReader::Open(LPCTSTR path)
 {
 	Close();
+#ifdef _WIN32
 	// 継承を無効にするため低水準で開く
 	int fd;
 	if (_tsopen_s(&fd, path, _O_BINARY | _O_NOINHERIT | _O_RDONLY | _O_SEQUENTIAL, _SH_DENYNO, 0) == 0) {
@@ -33,6 +32,15 @@ bool CTextFileReader::Open(LPCTSTR path)
 			_close(fd);
 		}
 	}
+#else
+	fp_.reset(fopen(path, "r"));
+	if (fp_) {
+		if (setvbuf(fp_.get(), nullptr, _IONBF, 0) == 0) {
+			return true;
+		}
+		fp_.reset();
+	}
+#endif
 	return false;
 }
 
@@ -41,7 +49,9 @@ bool CTextFileReader::OpenZippedFile(LPCTSTR zipPath, const char *fileName)
 	Close();
 	zlib_filefunc64_def def;
 	fill_fopen64_filefunc(&def);
+#ifdef _WIN32
 	def.zopen64_file = TfopenSFileFuncForZlib;
+#endif
 	zipf_.reset(unzOpen2_64(zipPath, &def));
 	if (zipf_) {
 		if (unzLocateFile(zipf_.get(), fileName, 0) == UNZ_OK && unzOpenCurrentFile(zipf_.get()) == UNZ_OK) {
@@ -108,8 +118,9 @@ size_t CTextFileReader::ReadLine(char *text, size_t textMax)
 		}
 		size_t lineLen = strcspn(buf_, "\n");
 		size_t copyNum = std::min(lineLen, textMax - textLen - 1);
-		strncpy_s(text + textLen, textMax - textLen, buf_, copyNum);
+		memcpy(text + textLen, buf_, copyNum);
 		textLen += copyNum;
+		text[textLen] = '\0';
 		if (lineLen < BUF_SIZE - 1) {
 			if (buf_[lineLen] == '\n') ++lineLen;
 			memmove(buf_, buf_ + lineLen, sizeof(buf_) - lineLen);
@@ -132,8 +143,8 @@ size_t CTextFileReader::ReadLastLine(char *text, size_t textMax)
 		return 0;
 	}
 	// バイナリモードでのSEEK_ENDは厳密には議論あるが、Windowsでは問題ない
-	if (_fseeki64(fp_.get(), 0, SEEK_END) != 0 ||
-	    _fseeki64(fp_.get(), -std::min<LONGLONG>(textMax - 1, _ftelli64(fp_.get())), SEEK_END) != 0) {
+	if (my_fseek(fp_.get(), 0, SEEK_END) != 0 ||
+	    my_fseek(fp_.get(), -std::min<LONGLONG>(textMax - 1, my_ftell(fp_.get())), SEEK_END) != 0) {
 		ResetPointer();
 		return 0;
 	}
@@ -168,16 +179,16 @@ LONGLONG CTextFileReader::Seek(LONGLONG scale)
 	if (!fp_ || scale == 0) {
 		return 0;
 	}
-	LONGLONG filePos = _ftelli64(fp_.get());
-	if (_fseeki64(fp_.get(), 0, SEEK_END) != 0) {
-		_fseeki64(fp_.get(), filePos, SEEK_SET);
+	LONGLONG filePos = my_ftell(fp_.get());
+	if (my_fseek(fp_.get(), 0, SEEK_END) != 0) {
+		my_fseek(fp_.get(), filePos, SEEK_SET);
 		return 0;
 	}
-	LONGLONG fileSize = _ftelli64(fp_.get());
+	LONGLONG fileSize = my_ftell(fp_.get());
 	LONGLONG nextPos = fileSize / (scale < 0 ? -scale : scale) * (scale < 0 ? -1 : 1) + filePos;
 	nextPos = std::min(std::max<LONGLONG>(nextPos, 0), fileSize);
-	if (_fseeki64(fp_.get(), nextPos, SEEK_SET) != 0) {
-		_fseeki64(fp_.get(), filePos, SEEK_SET);
+	if (my_fseek(fp_.get(), nextPos, SEEK_SET) != 0) {
+		my_fseek(fp_.get(), filePos, SEEK_SET);
 		return 0;
 	}
 	bEof_ = false;
@@ -185,6 +196,7 @@ LONGLONG CTextFileReader::Seek(LONGLONG scale)
 	return nextPos - filePos;
 }
 
+#ifdef _WIN32
 // zlib_filefunc64_def構造体のzopen64_file関数のTCHAR版
 void *CTextFileReader::TfopenSFileFuncForZlib(void *opaque, const void *filename, int mode)
 {
@@ -198,3 +210,4 @@ void *CTextFileReader::TfopenSFileFuncForZlib(void *opaque, const void *filename
 	}
 	return nullptr;
 }
+#endif
