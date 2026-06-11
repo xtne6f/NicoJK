@@ -1,5 +1,5 @@
 ﻿struct JKID_NAME_ELEM {
-	int jkID;
+	int first; // jkID
 	LPCTSTR name;
 	const char *chatStreamID;
 };

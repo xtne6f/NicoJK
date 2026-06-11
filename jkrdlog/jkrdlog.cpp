@@ -35,14 +35,12 @@ int main(int argc, char **argv)
 			}
 		} else if (i == argc - 3) {
 			if (argv[i][0] == TEXT('n') && argv[i][1] == TEXT('s')) {
-				NETWORK_SERVICE_ID_ELEM e;
-				e.ntsID = _tcstoul(argv[i] + 2, nullptr, 10);
+				DWORD ntsID = _tcstoul(argv[i] + 2, nullptr, 10);
 				// 上位と下位をひっくり返しているので補正
-				e.ntsID = (e.ntsID << 16) | (e.ntsID >> 16);
+				ntsID = (ntsID << 16) | (ntsID >> 16);
 				const NETWORK_SERVICE_ID_ELEM *pEnd = DEFAULT_NTSID_TABLE + sizeof(DEFAULT_NTSID_TABLE) / sizeof(DEFAULT_NTSID_TABLE[0]);
-				const NETWORK_SERVICE_ID_ELEM *p = std::lower_bound(DEFAULT_NTSID_TABLE, pEnd, e,
-					[](const NETWORK_SERVICE_ID_ELEM &a, const NETWORK_SERVICE_ID_ELEM &b) { return a.ntsID < b.ntsID; });
-				if (p != pEnd && p->ntsID == e.ntsID) {
+				const NETWORK_SERVICE_ID_ELEM *p = lower_bound_first(DEFAULT_NTSID_TABLE, pEnd, ntsID);
+				if (p != pEnd && p->first == ntsID) {
 					jkID = p->jkID;
 				}
 			} else if (argv[i][0] == TEXT('j') && argv[i][1] == TEXT('k')) {

@@ -498,22 +498,6 @@ void CNicoJK::ToggleStreamCallback(bool bSet)
 	}
 }
 
-std::vector<NETWORK_SERVICE_ID_ELEM>::iterator CNicoJK::LowerBoundNetworkServiceID(std::vector<NETWORK_SERVICE_ID_ELEM>::iterator first,
-                                                                                   std::vector<NETWORK_SERVICE_ID_ELEM>::iterator last, DWORD ntsID)
-{
-	NETWORK_SERVICE_ID_ELEM e;
-	e.ntsID = ntsID;
-	return std::lower_bound(first, last, e, [](const NETWORK_SERVICE_ID_ELEM &a, const NETWORK_SERVICE_ID_ELEM &b) { return a.ntsID < b.ntsID; });
-}
-
-std::vector<CNicoJK::FORCE_ELEM>::iterator CNicoJK::LowerBoundJKID(std::vector<FORCE_ELEM>::iterator first,
-                                                                   std::vector<FORCE_ELEM>::iterator last, int jkID)
-{
-	FORCE_ELEM e;
-	e.jkID = jkID;
-	return std::lower_bound(first, last, e, [](const FORCE_ELEM &a, const FORCE_ELEM &b) { return a.jkID < b.jkID; });
-}
-
 void CNicoJK::LoadFromIni()
 {
 	// iniはセクション単位で読むと非常に速い。起動時は処理が混み合うのでとくに有利
@@ -609,15 +593,15 @@ void CNicoJK::LoadFromIni()
 	buf = GetPrivateProfileSectionBuffer(TEXT("Channels"), iniFileName_.c_str());
 	for (LPCTSTR p = buf.data(); *p; p += _tcslen(p) + 1) {
 		NETWORK_SERVICE_ID_ELEM e;
-		bool bPrior = _stscanf_s(p, TEXT("0x%x=+%d"), &e.ntsID, &e.jkID) == 2;
+		bool bPrior = _stscanf_s(p, TEXT("0x%x=+%d"), &e.first, &e.jkID) == 2;
 		if (bPrior) {
 			e.jkID |= NETWORK_SERVICE_ID_ELEM::JKID_PRIOR;
 		}
-		if (bPrior || _stscanf_s(p, TEXT("0x%x=%d"), &e.ntsID, &e.jkID) == 2) {
+		if (bPrior || _stscanf_s(p, TEXT("0x%x=%d"), &e.first, &e.jkID) == 2) {
 			// 設定ファイルの定義では上位と下位をひっくり返しているので補正
-			e.ntsID = (e.ntsID<<16) | (e.ntsID>>16);
-			std::vector<NETWORK_SERVICE_ID_ELEM>::iterator it = LowerBoundNetworkServiceID(ntsIDList_.begin(), ntsIDList_.end(), e.ntsID);
-			if (it != ntsIDList_.end() && it->ntsID == e.ntsID) {
+			e.first = (e.first << 16) | (e.first >> 16);
+			std::vector<NETWORK_SERVICE_ID_ELEM>::iterator it = lower_bound_first(ntsIDList_.begin(), ntsIDList_.end(), e.first);
+			if (it != ntsIDList_.end() && it->first == e.first) {
 				*it = e;
 			} else {
 				ntsIDList_.insert(it, e);
@@ -649,7 +633,7 @@ void CNicoJK::LoadForceListFromIni(const tstring &logfileFolder)
 	for (size_t i = 0; i < _countof(DEFAULT_JKID_NAME_TABLE); ++i) {
 		if (DEFAULT_JKID_NAME_TABLE[i].chatStreamID) {
 			FORCE_ELEM e;
-			e.jkID = DEFAULT_JKID_NAME_TABLE[i].jkID;
+			e.first = DEFAULT_JKID_NAME_TABLE[i].first;
 			e.chatStreamID = DEFAULT_JKID_NAME_TABLE[i].chatStreamID;
 			e.refugeChatStreamID = e.chatStreamID;
 			e.force = -1;
@@ -662,10 +646,10 @@ void CNicoJK::LoadForceListFromIni(const tstring &logfileFolder)
 	std::vector<TCHAR> buf = GetPrivateProfileSectionBuffer(TEXT("ChatStreams"), iniFileName_.c_str());
 	for (LPCTSTR p = buf.data(); *p; p += _tcslen(p) + 1) {
 		FORCE_ELEM e;
-		e.jkID = _tcstol(p, nullptr, 10);
-		if (e.jkID > 0) {
+		e.first = _tcstol(p, nullptr, 10);
+		if (e.first > 0) {
 			TCHAR key[16];
-			_stprintf_s(key, TEXT("%d"), e.jkID);
+			_stprintf_s(key, TEXT("%d"), e.first);
 			tstring val = GetBufferedProfileToString(buf.data(), key, TEXT("!"));
 			if (val != TEXT("!")) {
 				bool bFirstVal = true;
@@ -694,8 +678,8 @@ void CNicoJK::LoadForceListFromIni(const tstring &logfileFolder)
 				e.force = -1;
 				e.bFixedName = false;
 				// まだなければ追加
-				std::vector<FORCE_ELEM>::iterator it = LowerBoundJKID(forceList_.begin(), forceList_.end(), e.jkID);
-				if (it == forceList_.end() || it->jkID != e.jkID) {
+				std::vector<FORCE_ELEM>::iterator it = lower_bound_first(forceList_.begin(), forceList_.end(), e.first);
+				if (it == forceList_.end() || it->first != e.first) {
 					if (!e.chatStreamID.empty() || !e.refugeChatStreamID.empty()) {
 						forceList_.insert(it, e);
 					}
@@ -712,12 +696,12 @@ void CNicoJK::LoadForceListFromIni(const tstring &logfileFolder)
 	if (!logfileFolder.empty()) {
 		EnumFindFile((logfileFolder + TEXT("\\jk*")).c_str(), [this](const WIN32_FIND_DATA &fd) {
 			FORCE_ELEM e;
-			if (!_tcsnicmp(fd.cFileName, TEXT("jk"), 2) && (e.jkID = _tcstol(&fd.cFileName[2], nullptr, 10)) > 0) {
+			if (!_tcsnicmp(fd.cFileName, TEXT("jk"), 2) && (e.first = _tcstol(&fd.cFileName[2], nullptr, 10)) > 0) {
 				e.force = -1;
 				e.bFixedName = false;
 				// まだなければ追加
-				std::vector<FORCE_ELEM>::iterator it = LowerBoundJKID(forceList_.begin(), forceList_.end(), e.jkID);
-				if (it == forceList_.end() || it->jkID != e.jkID) {
+				std::vector<FORCE_ELEM>::iterator it = lower_bound_first(forceList_.begin(), forceList_.end(), e.first);
+				if (it == forceList_.end() || it->first != e.first) {
 					forceList_.insert(it, e);
 				}
 			}
@@ -726,12 +710,9 @@ void CNicoJK::LoadForceListFromIni(const tstring &logfileFolder)
 
 	// とりあえず組み込みのチャンネル名をセットしておく
 	for (auto it = forceList_.begin(); it != forceList_.end(); ++it) {
-		JKID_NAME_ELEM e;
-		e.jkID = it->jkID;
-		const JKID_NAME_ELEM *p = std::lower_bound(
-			DEFAULT_JKID_NAME_TABLE, DEFAULT_JKID_NAME_TABLE + _countof(DEFAULT_JKID_NAME_TABLE), e,
-			[](const JKID_NAME_ELEM &a, const JKID_NAME_ELEM &b) { return a.jkID < b.jkID; });
-		if (p && p->jkID == e.jkID) {
+		const JKID_NAME_ELEM *pEnd = DEFAULT_JKID_NAME_TABLE + _countof(DEFAULT_JKID_NAME_TABLE);
+		const JKID_NAME_ELEM *p = lower_bound_first(DEFAULT_JKID_NAME_TABLE, pEnd, it->first);
+		if (p != pEnd && p->first == it->first) {
 			it->name = p->name;
 		}
 	}
@@ -740,8 +721,8 @@ void CNicoJK::LoadForceListFromIni(const tstring &logfileFolder)
 	buf = GetPrivateProfileSectionBuffer(TEXT("ChannelNames"), iniFileName_.c_str());
 	for (LPCTSTR p = buf.data(); *p; p += _tcslen(p) + 1) {
 		int jkID = _tcstol(p, nullptr, 10);
-		std::vector<FORCE_ELEM>::iterator it = LowerBoundJKID(forceList_.begin(), forceList_.end(), jkID);
-		if (it != forceList_.end() && it->jkID == jkID) {
+		std::vector<FORCE_ELEM>::iterator it = lower_bound_first(forceList_.begin(), forceList_.end(), jkID);
+		if (it != forceList_.end() && it->first == jkID) {
 			TCHAR key[16];
 			_stprintf_s(key, TEXT("%d"), jkID);
 			it->name = GetBufferedProfileToString(buf.data(), key, TEXT(""));
@@ -2301,7 +2282,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					int index = ListBox_GetCurSel((HWND)lParam);
 					int jkID = -1;
 					if (0 <= index && index < (int)forceList_.size()) {
-						jkID = forceList_[index].jkID;
+						jkID = forceList_[index].first;
 					}
 					if (currentJKToGet_ != jkID) {
 						currentJKToGet_ = jkID;
@@ -2315,8 +2296,8 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 						for (int stage = 0; stage < 2; ++stage) {
 							DWORD ntsID;
 							for (int i = 0; GetChannelNetworkServiceID(currentTuning, i, &ntsID); ++i) {
-								std::vector<NETWORK_SERVICE_ID_ELEM>::const_iterator it = LowerBoundNetworkServiceID(ntsIDList_.begin(), ntsIDList_.end(), ntsID);
-								int chJK = it != ntsIDList_.end() && it->ntsID == ntsID ? it->jkID : -1;
+								std::vector<NETWORK_SERVICE_ID_ELEM>::const_iterator it = lower_bound_first(ntsIDList_.begin(), ntsIDList_.end(), ntsID);
+								int chJK = it != ntsIDList_.end() && it->first == ntsID ? it->jkID : -1;
 								// 実況IDが一致するチャンネルに切替
 								// 実況IDからチャンネルへの対応は一般に一意ではないので優先度を設ける
 								if ((stage > 0 || (chJK & NETWORK_SERVICE_ID_ELEM::JKID_PRIOR)) && jkID == (chJK & ~NETWORK_SERVICE_ID_ELEM::JKID_PRIOR)) {
@@ -2438,7 +2419,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				} else {
 					for (auto it = forceList_.begin(); it != forceList_.end(); ++it) {
 						// 自力計算による勢い情報を使う
-						it->force = it->jkID == currentJK_ ? currentJKForceByChatCount_ : -1;
+						it->force = it->first == currentJK_ ? currentJKForceByChatCount_ : -1;
 					}
 					SendMessage(hwnd, WM_UPDATE_LIST, 2, 0);
 				}
@@ -2448,14 +2429,14 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			SetTimer(hwnd, TIMER_JK_WATCHDOG, max(JK_WATCHDOG_INTERVAL, 10000), nullptr);
 			if (currentJKToGet_ >= 0 && !bUsingLogfileDriver_) {
 				// chatStreamIDに変換
-				std::vector<FORCE_ELEM>::const_iterator it = LowerBoundJKID(forceList_.begin(), forceList_.end(), currentJKToGet_);
-				if (it != forceList_.end() && it->jkID == currentJKToGet_) {
+				std::vector<FORCE_ELEM>::const_iterator it = lower_bound_first(forceList_.begin(), forceList_.end(), currentJKToGet_);
+				if (it != forceList_.end() && it->first == currentJKToGet_) {
 					if (!it->refugeChatStreamID.empty() && !s_.refugeUri.empty()) {
 						// 避難所に接続
 						std::string uri = s_.refugeUri;
 						for (size_t i; (i = uri.find("{jkID}")) != std::string::npos;) {
 							char text[16];
-							sprintf_s(text, "jk%d", it->jkID);
+							sprintf_s(text, "jk%d", it->first);
 							uri.replace(i, sizeof("{jkID}") - 1, text);
 						}
 						for (size_t i; (i = uri.find("{chatStreamID}")) != std::string::npos;) {
@@ -2603,8 +2584,8 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 				// 視聴状態が変化したので視聴中のサービスに対応する実況IDを調べて変更する
 				KillTimer(hwnd, TIMER_SETUP_CURJK);
 				DWORD ntsID = GetCurrentNetworkServiceID();
-				std::vector<NETWORK_SERVICE_ID_ELEM>::const_iterator it = LowerBoundNetworkServiceID(ntsIDList_.begin(), ntsIDList_.end(), ntsID);
-				int jkID = it != ntsIDList_.end() && (it->ntsID == ntsID || (!(ntsID & 0xFFFF) && ntsID == (it->ntsID & 0xFFFF0000))) && it->jkID > 0 ?
+				std::vector<NETWORK_SERVICE_ID_ELEM>::const_iterator it = lower_bound_first(ntsIDList_.begin(), ntsIDList_.end(), ntsID);
+				int jkID = it != ntsIDList_.end() && (it->first == ntsID || (!(ntsID & 0xFFFF) && ntsID == (it->first & 0xFFFF0000))) && it->jkID > 0 ?
 					(it->jkID & ~NETWORK_SERVICE_ID_ELEM::JKID_PRIOR) : -1;
 				if (currentJKToGet_ != jkID) {
 					currentJKToGet_ = jkID;
@@ -2794,17 +2775,17 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 					TCHAR text[256];
 					if (it->force < 0) {
 						_stprintf_s(text, TEXT("jk%d 勢? (%.63s%s%.63S)"),
-						            it->jkID, it->name.c_str(),
+						            it->first, it->name.c_str(),
 						            it->chatStreamID.empty() && it->refugeChatStreamID.empty() ? TEXT("") : TEXT("-"),
 						            (it->chatStreamID.empty() ? it->refugeChatStreamID : it->chatStreamID).c_str());
 					} else {
 						_stprintf_s(text, TEXT("jk%d 勢%d (%.63s%s%.63S)"),
-						            it->jkID, it->force, it->name.c_str(),
+						            it->first, it->force, it->name.c_str(),
 						            it->chatStreamID.empty() && it->refugeChatStreamID.empty() ? TEXT("") : TEXT("-"),
 						            (it->chatStreamID.empty() ? it->refugeChatStreamID : it->chatStreamID).c_str());
 					}
 					ListBox_AddString(hList, text);
-					if (it->jkID == currentJKToGet_) {
+					if (it->first == currentJKToGet_) {
 						ListBox_SetCurSel(hList, ListBox_GetCount(hList) - 1);
 					}
 				}
@@ -2834,8 +2815,8 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 						std::cmatch mVideo;
 						if (std::regex_search(m[2].first, m[2].second, mVideo, reVideo)) {
 							int jkID = strtol(mVideo[1].first, nullptr, 10);
-							std::vector<FORCE_ELEM>::iterator it = LowerBoundJKID(forceList_.begin(), forceList_.end(), jkID);
-							if (it != forceList_.end() && it->jkID == jkID) {
+							std::vector<FORCE_ELEM>::iterator it = lower_bound_first(forceList_.begin(), forceList_.end(), jkID);
+							if (it != forceList_.end() && it->first == jkID) {
 								// 勢いと(もしあれば)名前を上書き
 								std::cmatch mForce, mName;
 								it->force = std::regex_search(m[2].first, m[2].second, mForce, reForce) ? strtol(mForce[1].first, nullptr, 10) : -1;

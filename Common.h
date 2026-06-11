@@ -47,6 +47,26 @@ struct fclose_deleter {
 	void operator()(FILE *fp) { fclose(fp); }
 };
 
+template<class RndIt, class T>
+RndIt lower_bound_first(RndIt first, RndIt last, const T &key)
+{
+	while (last != first) {
+		RndIt it = first + (last - first) / 2;
+		if (it->first < key) first = ++it; else last = it;
+	}
+	return first;
+}
+
+template<class RndIt, class T>
+RndIt upper_bound_first(RndIt first, RndIt last, const T &key)
+{
+	while (last != first) {
+		RndIt it = first + (last - first) / 2;
+		if (!(key < it->first)) first = ++it; else last = it;
+	}
+	return first;
+}
+
 #include <stdexcept>
 
 #ifndef _WIN32

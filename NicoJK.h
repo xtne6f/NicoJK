@@ -91,7 +91,7 @@ private:
 		bool bUsePanel;
 	};
 	struct FORCE_ELEM {
-		int jkID;
+		int first; // jkID
 		int force;
 		bool bFixedName;
 		tstring name;
@@ -129,10 +129,6 @@ private:
 	void ToggleStreamCallback(bool bSet);
 	void SyncThread();
 	void CheckRecordingThread(DWORD processID);
-	static std::vector<NETWORK_SERVICE_ID_ELEM>::iterator LowerBoundNetworkServiceID(std::vector<NETWORK_SERVICE_ID_ELEM>::iterator first,
-	                                                                                 std::vector<NETWORK_SERVICE_ID_ELEM>::iterator last, DWORD ntsID);
-	static std::vector<FORCE_ELEM>::iterator LowerBoundJKID(std::vector<FORCE_ELEM>::iterator first,
-	                                                        std::vector<FORCE_ELEM>::iterator last, int jkID);
 	void LoadFromIni();
 	void SaveToIni();
 	void LoadForceListFromIni(const tstring &logfileFolder);
