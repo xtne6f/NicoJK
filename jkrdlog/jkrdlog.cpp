@@ -3,12 +3,6 @@
 #include "../NetworkServiceIDTable.h"
 #include <algorithm>
 #include <chrono>
-#ifndef _WIN32
-#include <thread>
-#ifndef NICOJK_LOG_DIR
-#define NICOJK_LOG_DIR "/var/local/nicojk"
-#endif
-#endif
 
 #ifdef _WIN32
 int _tmain(int argc, TCHAR **argv)
@@ -211,11 +205,7 @@ int main(int argc, char **argv)
 				if ((tm - tmReadFrom) - elapsedMsec.count() * readRatePerMille / 1000000 < 0) {
 					break;
 				}
-#ifdef _WIN32
 				Sleep(100);
-#else
-				std::this_thread::sleep_for(std::chrono::milliseconds(100));
-#endif
 			}
 		}
 	}

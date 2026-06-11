@@ -1,10 +1,5 @@
 ﻿#pragma once
 
-#include <mutex>
-
-typedef std::recursive_mutex recursive_mutex_;
-typedef std::lock_guard<recursive_mutex_> lock_recursive_mutex;
-
 #define FILETIME_MILLISECOND 10000LL
 
 std::vector<TCHAR> GetPrivateProfileSectionBuffer(LPCTSTR lpAppName, LPCTSTR lpFileName);

@@ -2,7 +2,6 @@
 #include "JKTransfer.h"
 
 CJKTransfer::CJKTransfer()
-	: bWorkerCreated_(false)
 {
 }
 
@@ -13,18 +12,18 @@ CJKTransfer::~CJKTransfer()
 
 void CJKTransfer::BeginClose()
 {
-	if (bWorkerCreated_) {
+	if (workerThread_.joinable()) {
 		{
 			lock_recursive_mutex lock(workerLock_);
-			bStopWroker_ = true;
+			bStopWorker_ = true;
 		}
-		SetEvent(hWorkerEvent_);
+		workerEvent_.Set();
 	}
 }
 
 void CJKTransfer::Close()
 {
-	if (bWorkerCreated_) {
+	if (workerThread_.joinable()) {
 		BeginClose();
 		HANDLE hWorkerThread = workerThread_.native_handle();
 		if (WaitForSingleObject(hWorkerThread, 10000) == WAIT_TIMEOUT) {
@@ -34,37 +33,33 @@ void CJKTransfer::Close()
 		} else {
 			workerThread_.join();
 		}
-		CloseHandle(hWorkerEvent_);
-		bWorkerCreated_ = false;
 	}
 }
 
-bool CJKTransfer::CreateWorker(HWND hwnd, UINT msg, bool bEnablePost, DWORD processID)
+bool CJKTransfer::CreateWorker(bool bEnablePost, int processID)
 {
-	if (bWorkerCreated_) {
+	if (workerThread_.joinable()) {
 		return true;
 	}
-	hWorkerEvent_ = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-	if (hWorkerEvent_) {
-		workerThread_ = std::thread([this, hwnd, msg, bEnablePost, processID]() { WorkerThread(hwnd, msg, bEnablePost, processID); });
-		// 初期化を待つ
-		WaitForSingleObject(hWorkerEvent_, INFINITE);
-		if (bWorkerCreated_) {
-			lock_recursive_mutex lock(workerLock_);
-			bContinueWorker_ = true;
-			return true;
-		}
-		workerThread_.join();
-		CloseHandle(hWorkerEvent_);
+	bContinueWorker_ = true;
+	workerEvent_.Reset();
+	workerThread_ = std::thread([this, bEnablePost, processID]() { WorkerThread(bEnablePost, processID); });
+	// 初期化を待つ
+	workerEvent_.WaitOne();
+	if (!bContinueWorker_) {
+		lock_recursive_mutex lock(workerLock_);
+		bContinueWorker_ = true;
+		return true;
 	}
+	workerThread_.join();
 	return false;
 }
 
-void CJKTransfer::WorkerThread(HWND hwnd, UINT msg, bool bEnablePost, DWORD processID)
+void CJKTransfer::WorkerThread(bool bEnablePost, int processID)
 {
 	HANDLE hChatPipe = INVALID_HANDLE_VALUE;
 	HANDLE hPostPipe = INVALID_HANDLE_VALUE;
-	HANDLE olEvents[] = {hWorkerEvent_, CreateEvent(nullptr, TRUE, TRUE, nullptr), CreateEvent(nullptr, TRUE, TRUE, nullptr)};
+	HANDLE olEvents[] = {workerEvent_.Handle(), CreateEvent(nullptr, TRUE, TRUE, nullptr), CreateEvent(nullptr, TRUE, TRUE, nullptr)};
 	if (olEvents[1] && olEvents[2]) {
 		TCHAR pipeName[64];
 		_stprintf_s(pipeName, TEXT("\\\\.\\pipe\\chat_d7b64ac2_%d"), processID);
@@ -76,17 +71,16 @@ void CJKTransfer::WorkerThread(HWND hwnd, UINT msg, bool bEnablePost, DWORD proc
 	}
 	if (hChatPipe == INVALID_HANDLE_VALUE || (bEnablePost && hPostPipe == INVALID_HANDLE_VALUE)) {
 		// 親スレッドに初期化失敗を通知
-		SetEvent(hWorkerEvent_);
+		workerEvent_.Set();
 		if (hPostPipe != INVALID_HANDLE_VALUE) CloseHandle(hPostPipe);
 		if (hChatPipe != INVALID_HANDLE_VALUE) CloseHandle(hChatPipe);
 		if (olEvents[2]) CloseHandle(olEvents[2]);
 		if (olEvents[1]) CloseHandle(olEvents[1]);
 		return;
 	}
-	bWorkerCreated_ = true;
 	bContinueWorker_ = false;
-	bStopWroker_ = false;
-	SetEvent(hWorkerEvent_);
+	bStopWorker_ = false;
+	workerEvent_.Set();
 	// 親スレッドからの続行許可を待つ
 	for (;;) {
 		Sleep(0);
@@ -161,7 +155,7 @@ void CJKTransfer::WorkerThread(HWND hwnd, UINT msg, bool bEnablePost, DWORD proc
 								olPostBuf.push_back('\0');
 								postStr_ = olPostBuf.data();
 								// ウィンドウに通知
-								PostMessage(hwnd, msg, 0, 0);
+								PostMessage(hwndRecvPost_, recvPostMsg_, 0, 0);
 							}
 						}
 					}
@@ -202,7 +196,7 @@ void CJKTransfer::WorkerThread(HWND hwnd, UINT msg, bool bEnablePost, DWORD proc
 		int jkID;
 		{
 			lock_recursive_mutex lock(workerLock_);
-			if (bStopWroker_) {
+			if (bStopWorker_) {
 				break;
 			}
 			if (tick - waitTick >= (chatBuf_.empty() ? WRITE_PENDING_MAX : WRITE_PENDING_MIN)) {
@@ -260,24 +254,26 @@ void CJKTransfer::WorkerThread(HWND hwnd, UINT msg, bool bEnablePost, DWORD proc
 	CloseHandle(olEvents[1]);
 }
 
-bool CJKTransfer::Open(HWND hwnd, UINT msg, bool bEnablePost, DWORD processID)
+bool CJKTransfer::Open(HWND hwnd, UINT msg, bool bEnablePost, int processID)
 {
 	Close();
 	currentJKID_ = -1;
 	chatBuf_.clear();
 	postStr_.clear();
-	return CreateWorker(hwnd, msg, bEnablePost, processID);
+	hwndRecvPost_ = hwnd;
+	recvPostMsg_ = msg;
+	return CreateWorker(bEnablePost, processID);
 }
 
 bool CJKTransfer::SendChat(int jkID, const char *text)
 {
-	if (bWorkerCreated_) {
+	if (workerThread_.joinable()) {
 		lock_recursive_mutex lock(workerLock_);
 		currentJKID_ = jkID;
 		chatBuf_.insert(chatBuf_.end(), text, text + strlen(text));
 		chatBuf_.push_back('\r');
 		chatBuf_.push_back('\n');
-		SetEvent(hWorkerEvent_);
+		workerEvent_.Set();
 		return true;
 	}
 	return false;
@@ -286,7 +282,7 @@ bool CJKTransfer::SendChat(int jkID, const char *text)
 std::string CJKTransfer::ProcessRecvPost()
 {
 	std::string ret;
-	if (bWorkerCreated_) {
+	if (workerThread_.joinable()) {
 		lock_recursive_mutex lock(workerLock_);
 		ret.swap(postStr_);
 	}

@@ -3,9 +3,6 @@
 #include <share.h>
 #else
 #include <sys/stat.h>
-#ifndef NICOJK_LOG_DIR
-#define NICOJK_LOG_DIR "/var/local/nicojk"
-#endif
 #endif
 #include <limits.h>
 #include <time.h>

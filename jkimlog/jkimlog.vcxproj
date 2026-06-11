@@ -160,6 +160,7 @@
     <ClCompile Include="jkimlog.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\Common.h" />
     <ClInclude Include="..\ImportLogUtil.h" />
     <ClInclude Include="..\ToolsCommon.h" />
   </ItemGroup>

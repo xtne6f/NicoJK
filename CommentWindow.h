@@ -138,7 +138,7 @@ private:
 	void *pBits_;
 	HDC hdcWork_;
 	std::thread drawingThread_;
-	HANDLE hDrawingEvent_;
+	CAutoResetEvent drawingEvent_;
 	HANDLE hDrawingIdleEvent_;
 	std::atomic_bool bQuitDrawingThread_;
 	int commentSizeMin_;
@@ -161,7 +161,7 @@ private:
 	std::list<CHAT> chatList_;
 	std::list<CHAT> chatPoolList_;
 	// chatList_(リスト構造のみ),chatPoolList_を保護
-	recursive_mutex_ chatLock_;
+	std::recursive_mutex chatLock_;
 	int autoHideCount_;
 	int parentSizedCount_;
 	RECT rcParent_;

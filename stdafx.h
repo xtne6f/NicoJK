@@ -9,8 +9,7 @@
 
 #include <sdkddkver.h>
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#include "Common.h"
 #include <WindowsX.h>
 #include <objbase.h>
 #include <vector>
@@ -19,7 +18,6 @@
 #include <memory>
 #include <utility>
 #include <algorithm>
-#include <tchar.h>
 
 #pragma comment(lib, "winmm.lib")
 
@@ -28,9 +26,3 @@
 #undef max
 using std::min;
 using std::max;
-
-typedef std::basic_string<TCHAR> tstring;
-
-struct fclose_deleter {
-	void operator()(FILE *fp) { fclose(fp); }
-};

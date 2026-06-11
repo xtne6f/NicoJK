@@ -170,7 +170,6 @@ CNicoJK::CNicoJK()
 	, bPostToRefuge_(false)
 	, bPostToRefugeInverted_(false)
 	, bRecording_(false)
-	, hQuitCheckRecordingEvent_(nullptr)
 	, bUsingLogfileDriver_(false)
 	, bSetStreamCallback_(false)
 	, bResyncComment_(false)
@@ -461,7 +460,7 @@ void CNicoJK::CheckRecordingThread(DWORD processID)
 	TCHAR pipeName[64];
 	_stprintf_s(pipeName, TEXT("\\\\.\\pipe\\View_Ctrl_BonNoWaitPipe_%d"), processID);
 
-	while (WaitForSingleObject(hQuitCheckRecordingEvent_, 2000) == WAIT_TIMEOUT) {
+	while (!quitCheckRecordingEvent_.WaitOne(2000)) {
 		// EDCBのCtrlCmdインタフェースにアクセスしてその録画状態を調べる
 		HANDLE pipe = CreateFile(pipeName, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 		if (pipe != INVALID_HANDLE_VALUE) {
@@ -2023,10 +2022,8 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 							processID = _tcstoul(argv[i + 1], nullptr, 10);
 							if (processID != 0 && s_.bCheckProcessRecording) {
 								// 録画状態をチェックするスレッドを起動
-								hQuitCheckRecordingEvent_ = CreateEvent(nullptr, TRUE, FALSE, nullptr);
-								if (hQuitCheckRecordingEvent_) {
-									checkRecordingThread_ = std::thread([this, processID]() { CheckRecordingThread(processID); });
-								}
+								quitCheckRecordingEvent_.Reset();
+								checkRecordingThread_ = std::thread([this, processID]() { CheckRecordingThread(processID); });
 							}
 							break;
 						}
@@ -2049,11 +2046,9 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 	case WM_DESTROY:
 		{
 			// 録画状態をチェックするスレッドを終了
-			if (hQuitCheckRecordingEvent_) {
-				SetEvent(hQuitCheckRecordingEvent_);
+			if (checkRecordingThread_.joinable()) {
+				quitCheckRecordingEvent_.Set();
 				checkRecordingThread_.join();
-				CloseHandle(hQuitCheckRecordingEvent_);
-				hQuitCheckRecordingEvent_ = nullptr;
 			}
 			// パネルアイテムのサブクラス化を解除
 			if (hPanel_) {

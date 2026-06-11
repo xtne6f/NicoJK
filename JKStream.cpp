@@ -1,8 +1,8 @@
 ﻿#include "stdafx.h"
 #include "JKStream.h"
+#include "Util.h"
 
 CJKStream::CJKStream()
-	: bWorkerCreated_(false)
 {
 }
 
@@ -13,18 +13,18 @@ CJKStream::~CJKStream()
 
 void CJKStream::BeginClose()
 {
-	if (bWorkerCreated_) {
+	if (workerThread_.joinable()) {
 		{
 			lock_recursive_mutex lock(workerLock_);
-			bStopWroker_ = true;
+			bStopWorker_ = true;
 		}
-		SetEvent(hWorkerEvent_);
+		workerEvent_.Set();
 	}
 }
 
 void CJKStream::Close()
 {
-	if (bWorkerCreated_) {
+	if (workerThread_.joinable()) {
 		BeginClose();
 		if (WaitForSingleObject(hProcess_, 10000) == WAIT_TIMEOUT) {
 			TerminateProcess(hProcess_, 1);
@@ -38,29 +38,25 @@ void CJKStream::Close()
 			workerThread_.join();
 		}
 		CloseHandle(hProcess_);
-		CloseHandle(hWorkerEvent_);
-		bWorkerCreated_ = false;
 	}
 }
 
-bool CJKStream::CreateWorker(HWND hwnd, UINT msg)
+bool CJKStream::CreateWorker()
 {
-	if (bWorkerCreated_) {
+	if (workerThread_.joinable()) {
 		return true;
 	}
-	hWorkerEvent_ = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-	if (hWorkerEvent_) {
-		workerThread_ = std::thread([this, hwnd, msg]() { WorkerThread(hwnd, msg); });
-		// 初期化を待つ
-		WaitForSingleObject(hWorkerEvent_, INFINITE);
-		if (bWorkerCreated_) {
-			lock_recursive_mutex lock(workerLock_);
-			bContinueWorker_ = true;
-			return true;
-		}
-		workerThread_.join();
-		CloseHandle(hWorkerEvent_);
+	bContinueWorker_ = true;
+	workerEvent_.Reset();
+	workerThread_ = std::thread([this]() { WorkerThread(); });
+	// 初期化を待つ
+	workerEvent_.WaitOne();
+	if (!bContinueWorker_) {
+		lock_recursive_mutex lock(workerLock_);
+		bContinueWorker_ = true;
+		return true;
 	}
+	workerThread_.join();
 	return false;
 }
 
@@ -120,26 +116,25 @@ bool CJKStream::CreateJKProcess(HANDLE &hProcess, HANDLE &hAsyncReadPipe, HANDLE
 	return false;
 }
 
-void CJKStream::WorkerThread(HWND hwnd, UINT msg)
+void CJKStream::WorkerThread()
 {
-	HANDLE olEvents[] = {hWorkerEvent_, CreateEvent(nullptr, TRUE, TRUE, nullptr)};
+	HANDLE olEvents[] = {workerEvent_.Handle(), CreateEvent(nullptr, TRUE, TRUE, nullptr)};
 	if (!olEvents[1]) {
 		// 親スレッドに初期化失敗を通知
-		SetEvent(hWorkerEvent_);
+		workerEvent_.Set();
 		return;
 	}
 	HANDLE hReadPipe, hWritePipe;
 	if (!CreateJKProcess(hProcess_, hReadPipe, hWritePipe)) {
 		// 親スレッドに初期化失敗を通知
-		SetEvent(hWorkerEvent_);
+		workerEvent_.Set();
 		CloseHandle(olEvents[1]);
 		return;
 	}
-	bWorkerCreated_ = true;
 	bContinueWorker_ = false;
-	bStopWroker_ = false;
+	bStopWorker_ = false;
 	bOpened_ = false;
-	SetEvent(hWorkerEvent_);
+	workerEvent_.Set();
 	// 親スレッドからの続行許可を待つ
 	for (;;) {
 		Sleep(0);
@@ -185,11 +180,11 @@ void CJKStream::WorkerThread(HWND hwnd, UINT msg)
 			// 非同期読み込み開始
 			if (bPost) {
 				// ウィンドウに受信を通知
-				PostMessage(hwnd, msg, 0, 0);
+				PostMessage(hwndRecv_, recvMsg_, 0, 0);
 			}
 		} else {
 			lock_recursive_mutex lock(workerLock_);
-			if (bStopWroker_) {
+			if (bStopWorker_) {
 				DWORD dwWritten;
 				WriteFile(hWritePipe, "q\r\n", 3, &dwWritten, nullptr);
 				break;
@@ -229,7 +224,7 @@ void CJKStream::WorkerThread(HWND hwnd, UINT msg)
 bool CJKStream::Send(HWND hwnd, UINT msg, char command, const char *buf)
 {
 	if (!strchr(buf, '\n') && !strchr(buf, '\r')) {
-		if (command == '+' && bWorkerCreated_ && bOpened_ && !bShutdown_) {
+		if (command == '+' && workerThread_.joinable() && bOpened_ && !bShutdown_) {
 			// 前のデータを送信済みのときだけ送信データを追加できる
 			lock_recursive_mutex lock(workerLock_);
 			if (sendBuf_.empty()) {
@@ -237,11 +232,15 @@ bool CJKStream::Send(HWND hwnd, UINT msg, char command, const char *buf)
 				sendBuf_.insert(sendBuf_.end(), buf, buf + strlen(buf));
 				sendBuf_.push_back('\r');
 				sendBuf_.push_back('\n');
-				SetEvent(hWorkerEvent_);
+				workerEvent_.Set();
 				return true;
 			}
-		} else if (command != '+' && (!bWorkerCreated_ || !bOpened_)) {
-			if (CreateWorker(hwnd, msg)) {
+		} else if (command != '+' && (!workerThread_.joinable() || !bOpened_)) {
+			if (!workerThread_.joinable()) {
+				hwndRecv_ = hwnd;
+				recvMsg_ = msg;
+			}
+			if (CreateWorker()) {
 				// ストリームを開く
 				lock_recursive_mutex lock(workerLock_);
 				recvBuf_.clear();
@@ -253,7 +252,7 @@ bool CJKStream::Send(HWND hwnd, UINT msg, char command, const char *buf)
 				bShutdown_ = false;
 				bShutdownSent_ = false;
 				bOpened_ = true;
-				SetEvent(hWorkerEvent_);
+				workerEvent_.Set();
 				return true;
 			}
 		}
@@ -261,12 +260,12 @@ bool CJKStream::Send(HWND hwnd, UINT msg, char command, const char *buf)
 	return false;
 }
 
-// ウィンドウメッセージを処理してデータを受信する
+// データを受信する
 // 受信データはrecvBufに追記される
 // 戻り値: 負値=切断した(-2=正常,-1=中断), 0=正常に処理した
 int CJKStream::ProcessRecv(std::vector<char> &recvBuf)
 {
-	if (bWorkerCreated_ && bOpened_) {
+	if (workerThread_.joinable() && bOpened_) {
 		lock_recursive_mutex lock(workerLock_);
 		std::vector<char>::iterator it = recvBuf_.begin();
 		for (;;) {
@@ -307,11 +306,11 @@ int CJKStream::ProcessRecv(std::vector<char> &recvBuf)
 // 呼び出し後ProcessRecv()が負値を返すと完了(ストリームも閉じられる)
 bool CJKStream::Shutdown()
 {
-	if (bWorkerCreated_ && bOpened_) {
+	if (workerThread_.joinable() && bOpened_) {
 		if (!bShutdown_) {
 			lock_recursive_mutex lock(workerLock_);
 			bShutdown_ = true;
-			SetEvent(hWorkerEvent_);
+			workerEvent_.Set();
 		}
 		return true;
 	}

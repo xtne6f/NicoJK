@@ -221,7 +221,6 @@ CCommentWindow::CCommentWindow()
 	, hbmWork_(nullptr)
 	, pBits_(nullptr)
 	, hdcWork_(nullptr)
-	, hDrawingEvent_(nullptr)
 	, hDrawingIdleEvent_(nullptr)
 	, bQuitDrawingThread_(false)
 	, commentSizeMin_(1)
@@ -276,9 +275,9 @@ bool CCommentWindow::Create(HWND hwndParent)
 		               TEXT("ru.jk.comment"), nullptr, WS_POPUP, 0, 0, 0, 0, hwndParent_, nullptr, hinst_, this);
 		if (hwnd_) {
 			if (!bUseOsd_ && bUseDrawingThread_) {
-				hDrawingEvent_ = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+				drawingEvent_.Reset();
 				hDrawingIdleEvent_ = CreateEvent(nullptr, TRUE, TRUE, nullptr);
-				if (hDrawingEvent_ && hDrawingIdleEvent_) {
+				if (hDrawingIdleEvent_) {
 					bQuitDrawingThread_ = false;
 					drawingThread_ = std::thread([this](){ DrawingThread(); });
 					SetThreadPriority(drawingThread_.native_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
@@ -299,16 +298,12 @@ void CCommentWindow::Destroy()
 {
 	if (drawingThread_.joinable()) {
 		bQuitDrawingThread_ = true;
-		SetEvent(hDrawingEvent_);
+		drawingEvent_.Set();
 		drawingThread_.join();
 	}
 	if (hDrawingIdleEvent_) {
 		CloseHandle(hDrawingIdleEvent_);
 		hDrawingIdleEvent_ = nullptr;
-	}
-	if (hDrawingEvent_) {
-		CloseHandle(hDrawingEvent_);
-		hDrawingEvent_ = nullptr;
 	}
 	if (hwnd_) {
 		DestroyWindow(hwnd_);
@@ -670,7 +665,7 @@ void CCommentWindow::UpdateLayeredWindow()
 		// あとはスレッドに任せる
 		// 目的は高速化ではなくメインスレッドの拘束時間を減らすこと
 		ResetEvent(hDrawingIdleEvent_);
-		SetEvent(hDrawingEvent_);
+		drawingEvent_.Set();
 	} else {
 		UpdateChat();
 	}
@@ -679,7 +674,7 @@ void CCommentWindow::UpdateLayeredWindow()
 // 描画スレッド
 void CCommentWindow::DrawingThread()
 {
-	while (WaitForSingleObject(hDrawingEvent_, INFINITE) == WAIT_OBJECT_0 && !bQuitDrawingThread_) {
+	while (drawingEvent_.WaitOne() && !bQuitDrawingThread_) {
 		UpdateChat();
 		// これがシグナル状態のとき描画スレッドはメンバ変数にアクセスしてはいけない
 		SetEvent(hDrawingIdleEvent_);

@@ -159,6 +159,7 @@
     <None Include="ReadMe.txt" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Common.h" />
     <ClInclude Include="ImportLogUtil.h" />
     <ClInclude Include="JKStream.h" />
     <ClInclude Include="CommentWindow.h" />

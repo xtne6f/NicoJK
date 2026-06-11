@@ -1,5 +1,4 @@
 ﻿#pragma once
-#include "Util.h"
 #include <thread>
 
 // プロセス間でコメントと投稿を送受信する
@@ -16,21 +15,22 @@ public:
 	~CJKTransfer();
 	void BeginClose();
 	void Close();
-	bool Open(HWND hwnd, UINT msg, bool bEnablePost, DWORD processID);
+	bool Open(HWND hwnd, UINT msg, bool bEnablePost, int processID);
 	// コメントを送る
 	bool SendChat(int jkID, const char *text);
 	// 投稿を受信する
 	std::string ProcessRecvPost();
 private:
-	bool CreateWorker(HWND hwnd, UINT msg, bool bEnablePost, DWORD processID);
-	void WorkerThread(HWND hwnd, UINT msg, bool bEnablePost, DWORD processID);
+	bool CreateWorker(bool bEnablePost, int processID);
+	void WorkerThread(bool bEnablePost, int processID);
 
-	recursive_mutex_ workerLock_;
+	std::recursive_mutex workerLock_;
 	std::thread workerThread_;
-	HANDLE hWorkerEvent_;
-	bool bWorkerCreated_;
+	CAutoResetEvent workerEvent_;
+	HWND hwndRecvPost_;
+	UINT recvPostMsg_;
 	bool bContinueWorker_;
-	bool bStopWroker_;
+	bool bStopWorker_;
 	int currentJKID_;
 	std::vector<char> chatBuf_;
 	std::string postStr_;

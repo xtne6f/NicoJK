@@ -218,7 +218,7 @@ private:
 	// 過去ログ関係
 	std::atomic_bool bRecording_;
 	std::thread checkRecordingThread_;
-	HANDLE hQuitCheckRecordingEvent_;
+	CAutoResetEvent quitCheckRecordingEvent_;
 	bool bUsingLogfileDriver_;
 	bool bSetStreamCallback_;
 	bool bResyncComment_;
@@ -240,7 +240,7 @@ private:
 	int pcrPid_;
 	int pcrPids_[8];
 	int pcrPidCounts_[8];
-	recursive_mutex_ streamLock_;
+	std::recursive_mutex streamLock_;
 
 	// 指定ファイル再生
 	bool bSpecFile_;
