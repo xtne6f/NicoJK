@@ -175,9 +175,6 @@ CNicoJK::CNicoJK()
 	, bResyncComment_(false)
 	, bNicoReceivingPastChat_(false)
 	, bRefugeReceivingPastChat_(false)
-	, currentLogfileJK_(-1)
-	, hLogfile_(INVALID_HANDLE_VALUE)
-	, hLogfileLock_(INVALID_HANDLE_VALUE)
 	, llftTot_(-1)
 	, pcr_(0)
 	, pcrTick_(0)
@@ -190,6 +187,8 @@ CNicoJK::CNicoJK()
 	logReader_.SetCheckIntervalMsec(READ_LOG_FOLDER_INTERVAL);
 	SETTINGS s = {};
 	s_ = s;
+	logfileCtx_.jkID = -1;
+	logfileCtx_.tick = 0;
 	pcrPids_[0] = -1;
 }
 
@@ -910,62 +909,69 @@ bool CNicoJK::IsMatchDriverName(LPCTSTR drivers)
 
 // 指定した実況IDのログファイルに書き込む
 // jkIDが負値のときはログファイルを閉じる
-void CNicoJK::WriteToLogfile(int jkID, const char *text)
+void CNicoJK::WriteToLogfile(LOGFILE_CONTEXT &ctx, int jkID, const char *text)
 {
 	if (s_.logfileFolder.empty() || s_.logfileMode == 0 || s_.logfileMode == 1 && !bRecording_) {
 		// ログを記録しない
 		jkID = -1;
 	}
-	if (currentLogfileJK_ >= 0 && currentLogfileJK_ != jkID) {
+	if (ctx.jkID >= 0 && ctx.jkID != jkID) {
 		// 閉じる
-		CloseHandle(hLogfile_);
-		CloseHandle(hLogfileLock_);
+		CloseHandle(ctx.hFile);
+		CloseHandle(ctx.hLockfile);
 		// ロックファイルを削除
 		TCHAR name[64];
-		_stprintf_s(name, TEXT("\\jk%d\\lockfile"), currentLogfileJK_);
+		_stprintf_s(name, TEXT("\\jk%d\\lockfile"), ctx.jkID);
 		DeleteFile((s_.logfileFolder + name).c_str());
-		currentLogfileJK_ = -1;
+		ctx.jkID = -1;
 		OutputMessageLog(TEXT("ログファイルの書き込みを終了しました。"));
 	}
-	if (currentLogfileJK_ < 0 && jkID >= 0) {
+	if (ctx.jkID < 0 && jkID >= 0) {
+		DWORD tick = GetTickCount();
 		unsigned int tm;
-		TCHAR name[64];
-		_stprintf_s(name, TEXT("\\jk%d"), jkID);
-		tstring path = s_.logfileFolder + name;
-		if (CLogReader::GetChatDate(&tm, text) &&
-		    (GetFileAttributes(path.c_str()) != INVALID_FILE_ATTRIBUTES || CreateDirectory(path.c_str(), nullptr))) {
-			// ロックファイルを開く
-			path += TEXT("\\lockfile");
-			hLogfileLock_ = CreateFile(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-			if (hLogfileLock_ != INVALID_HANDLE_VALUE) {
-				// 開く
-				_stprintf_s(name, TEXT("\\jk%d\\%010u.txt"), jkID, tm);
-				hLogfile_ = CreateFile((s_.logfileFolder + name).c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-				if (hLogfile_ != INVALID_HANDLE_VALUE) {
-					// ヘッダを書き込む(別に無くてもいい)
-					FILETIME ft, ftUtc = LongLongToFileTime(UnixTimeToFileTime(tm));
-					FileTimeToLocalFileTime(&ftUtc, &ft);
-					SYSTEMTIME st;
-					FileTimeToSystemTime(&ft, &st);
-					char header[128];
-					int len = sprintf_s(header, "<!-- NicoJK logfile from %04d-%02d-%02dT%02d:%02d:%02d -->\r\n",
-					                    st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-					DWORD written;
-					WriteFile(hLogfile_, header, len, &written, nullptr);
-					currentLogfileJK_ = jkID;
-					OutputMessageLog((tstring(TEXT("ログ\"")) + &name[1] + TEXT("\"の書き込みを開始しました。")).c_str());
-				} else {
-					CloseHandle(hLogfileLock_);
-					DeleteFile(path.c_str());
+		if ((ctx.tick == 0 || tick - ctx.tick >= READ_LOG_FOLDER_INTERVAL) && CLogReader::GetChatDate(&tm, text)) {
+			ctx.tick = tick;
+			TCHAR name[64];
+			_stprintf_s(name, TEXT("\\jk%d"), jkID);
+			tstring path = s_.logfileFolder + name;
+			if (GetFileAttributes(path.c_str()) != INVALID_FILE_ATTRIBUTES || CreateDirectory(path.c_str(), nullptr)) {
+				// ロックファイルを開く
+				path += TEXT("\\lockfile");
+				ctx.hLockfile = CreateFile(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+				if (ctx.hLockfile != INVALID_HANDLE_VALUE) {
+					// 開く
+					_stprintf_s(name, TEXT("\\jk%d\\%010u.txt"), jkID, tm);
+					ctx.hFile = CreateFile((s_.logfileFolder + name).c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+					if (ctx.hFile != INVALID_HANDLE_VALUE) {
+						// ヘッダを書き込む(別に無くてもいい)
+						FILETIME ft, ftUtc = LongLongToFileTime(UnixTimeToFileTime(tm));
+						FileTimeToLocalFileTime(&ftUtc, &ft);
+						SYSTEMTIME st;
+						FileTimeToSystemTime(&ft, &st);
+						char header[128];
+						int len = sprintf_s(header, "<!-- NicoJK logfile from %04d-%02d-%02dT%02d:%02d:%02d -->\r\n",
+						                    st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+						DWORD written;
+						WriteFile(ctx.hFile, header, len, &written, nullptr);
+						ctx.jkID = jkID;
+						ctx.tick = 0;
+						OutputMessageLog((tstring(TEXT("ログ\"")) + &name[1] + TEXT("\"の書き込みを開始しました。")).c_str());
+					} else {
+						CloseHandle(ctx.hLockfile);
+						DeleteFile(path.c_str());
+					}
 				}
 			}
 		}
+	} else {
+		ctx.tick = 0;
 	}
 	// 開いてたら書き込む
-	if (currentLogfileJK_ >= 0) {
+	if (ctx.jkID >= 0) {
+		ctx.buf = text;
+		ctx.buf += "\r\n";
 		DWORD written;
-		WriteFile(hLogfile_, text, static_cast<DWORD>(strlen(text)), &written, nullptr);
-		WriteFile(hLogfile_, "\r\n", 2, &written, nullptr);
+		WriteFile(ctx.hFile, ctx.buf.c_str(), static_cast<DWORD>(ctx.buf.size()), &written, nullptr);
 	}
 }
 
@@ -2062,7 +2068,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			s_.commentOpacity = (s_.commentOpacity&~0xFF) | commentWindow_.GetOpacity();
 			s_.bSetRelative = SendDlgItemMessage(hwnd, IDC_CHECK_RELATIVE, BM_GETCHECK, 0, 0) == BST_CHECKED;
 			// ログファイルを閉じる
-			WriteToLogfile(-1);
+			WriteToLogfile(logfileCtx_, -1);
 			ReadFromLogfile(-1);
 			if (bSpecFile_) {
 				DeleteFile(tmpSpecFileName_.c_str());
@@ -2851,7 +2857,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 			if (ret < 0) {
 				// 切断
 				OutputMessageLog(TEXT("コメントサーバとの接続を終了しました。"));
-				WriteToLogfile(-1);
+				WriteToLogfile(logfileCtx_, -1);
 				currentJK_ = -1;
 				if (bPostToRefugeInverted_) {
 					// 一時的な投稿先を戻す
@@ -2882,7 +2888,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 #endif
 							// ログの不整合を避けるため過去のコメントは保存しない
 							if (!bReceivingPastChat) {
-								WriteToLogfile(currentJK_, rpl);
+								WriteToLogfile(logfileCtx_, currentJK_, rpl);
 							}
 							jkTransfer_.SendChat(currentJK_, rpl);
 							++currentJKChatCount_;
@@ -2926,11 +2932,11 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 							// 過去のコメントの出力状態をリセット
 							(isRefuge ? bRefugeReceivingPastChat_ : bNicoReceivingPastChat_) = false;
 							OutputMessageLog(text);
-						} else if (std::regex_search(rpl, m, reXPastChatBegin)) {
+						} else if (std::regex_search(rpl, reXPastChatBegin)) {
 							// 過去のコメントの出力開始
 							bool isRefuge = std::regex_search(rpl, reIsRefuge);
 							(isRefuge ? bRefugeReceivingPastChat_ : bNicoReceivingPastChat_) = true;
-						} else if (std::regex_search(rpl, m, reXPastChatEnd)) {
+						} else if (std::regex_search(rpl, reXPastChatEnd)) {
 							// 過去のコメントの出力終了
 							bool isRefuge = std::regex_search(rpl, reIsRefuge);
 							(isRefuge ? bRefugeReceivingPastChat_ : bNicoReceivingPastChat_) = false;
