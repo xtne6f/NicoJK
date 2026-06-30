@@ -2874,14 +2874,12 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 						break;
 					}
 					*itEnd = '\0';
-					if (itEnd - it >= CLogReader::CHAT_TAG_MAX) {
-						*(it + CLogReader::CHAT_TAG_MAX - 1) = '\0';
-					}
 					const char *rpl = &*it;
 					if (!strncmp(rpl, "<chat ", 6)) {
 						// 指定ファイル再生中は混じると鬱陶しいので表示しない。後退指定はある程度反映
 						bool bRefuge = false;
-						if (ProcessChatTag(rpl, !bSpecFile_, static_cast<int>(min(max(-forwardOffset_, 0LL), 30000LL)), &bRefuge)) {
+						if (itEnd - it < CLogReader::CHAT_TAG_MAX &&
+						    ProcessChatTag(rpl, !bSpecFile_, static_cast<int>(min(max(-forwardOffset_, 0LL), 30000LL)), &bRefuge)) {
 							bool bReceivingPastChat = bRefuge ? bRefugeReceivingPastChat_ : bNicoReceivingPastChat_;
 #ifdef _DEBUG
 							OutputDebugString(bReceivingPastChat ? TEXT("#P#") : TEXT("#L#"));
@@ -2921,6 +2919,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 							            !isRefuge ? TEXT("ニコニコ実況") : s_.refugeUri.find("nx-jikkyo") != std::string::npos ? TEXT("NX-Jikkyo") : TEXT("避難所"),
 							            isLoggedIn ? TEXT("login=") : TEXT(""), nickname);
 							OutputMessageLog(text);
+							jkTransfer_.SendChat(currentJK_, rpl);
 						} else if (std::regex_search(rpl, m, reXDisconnect)) {
 							// 混合接続時に個々切断した
 							int status = strtol(m[1].first, nullptr, 10);
@@ -2932,6 +2931,7 @@ LRESULT CNicoJK::ForceWindowProcMain(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
 							// 過去のコメントの出力状態をリセット
 							(isRefuge ? bRefugeReceivingPastChat_ : bNicoReceivingPastChat_) = false;
 							OutputMessageLog(text);
+							jkTransfer_.SendChat(currentJK_, rpl);
 						} else if (std::regex_search(rpl, reXPastChatBegin)) {
 							// 過去のコメントの出力開始
 							bool isRefuge = std::regex_search(rpl, reIsRefuge);
