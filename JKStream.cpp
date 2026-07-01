@@ -1,6 +1,13 @@
-﻿#include "stdafx.h"
+﻿#include "Common.h"
 #include "JKStream.h"
+#include <algorithm>
+#ifdef _WIN32
 #include "Util.h"
+#else
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/wait.h>
+#endif
 
 CJKStream::CJKStream()
 {
@@ -26,6 +33,7 @@ void CJKStream::Close()
 {
 	if (workerThread_.joinable()) {
 		BeginClose();
+#ifdef _WIN32
 		if (WaitForSingleObject(hProcess_, 10000) == WAIT_TIMEOUT) {
 			TerminateProcess(hProcess_, 1);
 		}
@@ -38,6 +46,17 @@ void CJKStream::Close()
 			workerThread_.join();
 		}
 		CloseHandle(hProcess_);
+#else
+		for (int i = 0; waitpid(processID_, nullptr, WNOHANG) == 0; i++) {
+			if (i > 1000) {
+				kill(processID_, 9);
+				waitpid(processID_, nullptr, 0);
+				break;
+			}
+			Sleep(10);
+		}
+		workerThread_.join();
+#endif
 	}
 }
 
@@ -60,6 +79,7 @@ bool CJKStream::CreateWorker()
 	return false;
 }
 
+#ifdef _WIN32
 bool CJKStream::CreateJKProcess(HANDLE &hProcess, HANDLE &hAsyncReadPipe, HANDLE &hWritePipe)
 {
 	SECURITY_ATTRIBUTES sa;
@@ -115,9 +135,65 @@ bool CJKStream::CreateJKProcess(HANDLE &hProcess, HANDLE &hAsyncReadPipe, HANDLE
 	}
 	return false;
 }
+#else
+bool CJKStream::CreateJKProcess(int &processID, int &asyncReadPipe, int &writePipe)
+{
+	int upfd[2], dnfd[2];
+	if (pipe2(upfd, O_CLOEXEC) == 0) {
+		if (pipe2(dnfd, O_CLOEXEC) == 0) {
+			// 標準出力は非同期にする
+			if (fcntl(dnfd[0], F_SETFL, O_NONBLOCK) != -1) {
+				char parentPid[16];
+				sprintf(parentPid, "%d", static_cast<int>(getpid()));
+				processID = static_cast<int>(fork());
+				if (processID == 0) {
+					bool failed = false;
+					close(upfd[1]);
+					if (upfd[0] != STDIN_FILENO) {
+						failed = dup2(upfd[0], STDIN_FILENO) == -1;
+						close(upfd[0]);
+					}
+					close(dnfd[0]);
+					if (dnfd[1] != STDOUT_FILENO) {
+						failed = dup2(dnfd[1], STDOUT_FILENO) == -1 || failed;
+						close(dnfd[1]);
+					}
+					if (!failed) {
+						// シグナルマスクを初期化
+						sigset_t sset;
+						sigemptyset(&sset);
+						if (pthread_sigmask(SIG_SETMASK, &sset, nullptr) == 0) {
+							// 不正終了時に自力で落ちてもらうためにプロセスIDを渡す
+							execlp("jkcnsl", "jkcnsl", "-p", parentPid,
+#ifdef JKCNSL_UNIX_BASE_DIR
+							       "-d", JKCNSL_UNIX_BASE_DIR,
+#endif
+							       nullptr);
+						}
+					}
+					exit(EXIT_FAILURE);
+				}
+				if (processID != -1) {
+					asyncReadPipe = dnfd[0];
+					writePipe = upfd[1];
+					close(dnfd[1]);
+					close(upfd[0]);
+					return true;
+				}
+			}
+			close(dnfd[1]);
+			close(dnfd[0]);
+		}
+		close(upfd[1]);
+		close(upfd[0]);
+	}
+	return false;
+}
+#endif
 
 void CJKStream::WorkerThread()
 {
+#ifdef _WIN32
 	HANDLE olEvents[] = {workerEvent_.Handle(), CreateEvent(nullptr, TRUE, TRUE, nullptr)};
 	if (!olEvents[1]) {
 		// 親スレッドに初期化失敗を通知
@@ -131,6 +207,16 @@ void CJKStream::WorkerThread()
 		CloseHandle(olEvents[1]);
 		return;
 	}
+#else
+	int readPipe, writePipe;
+	if (!CreateJKProcess(processID_, readPipe, writePipe)) {
+		// 親スレッドに初期化失敗を通知
+		workerEvent_.Set();
+		return;
+	}
+	bWorkerDestroyed_ = false;
+#endif
+
 	bContinueWorker_ = false;
 	bStopWorker_ = false;
 	bOpened_ = false;
@@ -144,6 +230,7 @@ void CJKStream::WorkerThread()
 		}
 	}
 
+#ifdef _WIN32
 	OVERLAPPED ol = {};
 	char olBuf[8192];
 	for (;;) {
@@ -217,11 +304,69 @@ void CJKStream::WorkerThread()
 	CloseHandle(hWritePipe);
 	CloseHandle(hReadPipe);
 	CloseHandle(olEvents[1]);
+#else
+	char buf[8192];
+	for (;;) {
+		pollfd pfds[2];
+		pfds[0].fd = readPipe;
+		pfds[0].events = POLLIN;
+		pfds[1].fd = workerEvent_.Handle();
+		pfds[1].events = POLLIN;
+		if (poll(pfds, 2, -1) < 0 && errno != EINTR) {
+			// エラー
+			break;
+		}
+		ssize_t n = read(readPipe, buf, sizeof(buf));
+		if (n == 0 || (n < 0 && errno != EAGAIN)) {
+			break;
+		}
+		if (n > 0) {
+			lock_recursive_mutex lock(workerLock_);
+			if (bOpened_) {
+				recvBuf_.insert(recvBuf_.end(), buf, buf + n);
+				// 受信を通知
+				recvEvent_->Set();
+			}
+		}
+		if (workerEvent_.WaitOne(0)) {
+			lock_recursive_mutex lock(workerLock_);
+			if (bStopWorker_) {
+				n = write(writePipe, "q\n", 2);
+				static_cast<void>(n);
+				break;
+			}
+			if (bOpened_) {
+				if (bShutdown_ && !bShutdownSent_) {
+					if (write(writePipe, "c\n", 2) != 2) {
+						// エラーor閉じられた
+						break;
+					}
+					bShutdownSent_ = true;
+				}
+				if (sendBuf_.empty() == false && !bShutdownSent_) {
+					if (write(writePipe, sendBuf_.data(), sendBuf_.size()) != static_cast<ssize_t>(sendBuf_.size())) {
+						// エラーor閉じられた
+						break;
+					}
+					sendBuf_.clear();
+				}
+			}
+		}
+	}
+	close(writePipe);
+	close(readPipe);
+	lock_recursive_mutex lock(workerLock_);
+	bWorkerDestroyed_ = true;
+#endif
 }
 
 // 非同期通信を開始する
 // すでに開始しているときは失敗するが、command=='+'のときは開いているストリームに送信データを追加する
+#ifdef _WIN32
 bool CJKStream::Send(HWND hwnd, UINT msg, char command, const char *buf)
+#else
+bool CJKStream::Send(CAutoResetEvent *recvEvent, char command, const char *buf)
+#endif
 {
 	if (!strchr(buf, '\n') && !strchr(buf, '\r')) {
 		if (command == '+' && workerThread_.joinable() && bOpened_ && !bShutdown_) {
@@ -230,15 +375,21 @@ bool CJKStream::Send(HWND hwnd, UINT msg, char command, const char *buf)
 			if (sendBuf_.empty()) {
 				sendBuf_.push_back(command);
 				sendBuf_.insert(sendBuf_.end(), buf, buf + strlen(buf));
+#ifdef _WIN32
 				sendBuf_.push_back('\r');
+#endif
 				sendBuf_.push_back('\n');
 				workerEvent_.Set();
 				return true;
 			}
 		} else if (command != '+' && (!workerThread_.joinable() || !bOpened_)) {
 			if (!workerThread_.joinable()) {
+#ifdef _WIN32
 				hwndRecv_ = hwnd;
 				recvMsg_ = msg;
+#else
+				recvEvent_ = recvEvent;
+#endif
 			}
 			if (CreateWorker()) {
 				// ストリームを開く
@@ -247,7 +398,9 @@ bool CJKStream::Send(HWND hwnd, UINT msg, char command, const char *buf)
 				sendBuf_.clear();
 				sendBuf_.push_back(command);
 				sendBuf_.insert(sendBuf_.end(), buf, buf + strlen(buf));
+#ifdef _WIN32
 				sendBuf_.push_back('\r');
+#endif
 				sendBuf_.push_back('\n');
 				bShutdown_ = false;
 				bShutdownSent_ = false;
@@ -294,7 +447,11 @@ int CJKStream::ProcessRecv(std::vector<char> &recvBuf)
 			it = itEnd;
 		}
 		recvBuf_.erase(recvBuf_.begin(), it);
+#ifdef _WIN32
 		if (WaitForSingleObject(workerThread_.native_handle(), 0) != WAIT_TIMEOUT) {
+#else
+		if (bWorkerDestroyed_) {
+#endif
 			bOpened_ = false;
 			return -1;
 		}

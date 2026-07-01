@@ -31,10 +31,17 @@ typedef long long LONGLONG;
 #ifndef NICOJK_LOG_DIR
 #define NICOJK_LOG_DIR "/var/local/nicojk"
 #endif
+#ifndef JKTASK_BASE_DIR
+#define JKTASK_BASE_DIR "/var/local/jktask"
+#endif
+#ifndef EDCB_INI_ROOT
+#define EDCB_INI_ROOT "/var/local/edcb"
+#endif
 #endif
 
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <mutex>
 #include <string>

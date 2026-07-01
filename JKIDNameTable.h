@@ -4,6 +4,11 @@
 	const char *chatStreamID;
 };
 
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
+
 static const JKID_NAME_ELEM DEFAULT_JKID_NAME_TABLE[] = {
 	// ニコニコ実況チャンネルリスト(jkch.sh.txtより)(jkIDでソート必須)
 	{   1, TEXT("NHK総合"), "ch2646436" },
@@ -54,3 +59,7 @@ static const JKID_NAME_ELEM DEFAULT_JKID_NAME_TABLE[] = {
 	{ 333, TEXT("AT-X") },
 	{ 910, TEXT("SOLiVE24") },
 };
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif

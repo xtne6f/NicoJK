@@ -117,6 +117,29 @@ https://github.com/rutice/NicoJK/downloads
 https://github.com/rutice/NicoJK
 ※このフォークのソースコードは https://github.com/xt4ubq/NicoJK
 
+■Linux環境むけ
+jkimlogおよびjkrdlogはLinuxでもビルドできます。加えてチューナープロセス(今のとこ
+ろEpgDataCap_Bonのみ)に連動して自動で実況の取得等を行うjktaskもビルドできます。
+NicoJKのソースコードの最上位階層で
+$ make && sudo make install
+してください。詳細はMakefileの内容を参照してください。
+
+既定で"NicoJK"フォルダ(ディレクトリ)のパスは"/var/local/nicojk"、jktaskの設定フ
+ァイルなどを置くパスは"/var/local/jktask"です。これらのディレクトリとjktaskの設
+定ファイルとjktask常駐用のsystemdのユニットファイルは
+$ sudo make setup setup_user={jktask等の実行ユーザ名} setup_group={〃グループ名}
+で用意できます(ディレクトリパーミッションは適宜調整してください)。
+jktaskの常駐設定はたとえば以下のようにしてください。
+$ sudo systemctl enable jktask
+
+jktaskはjkcnslを利用するため、jkcnslも用意してください。
+jktaskの設定ファイルjktask.iniの設定項目の多くはNicoJK.iniと共通しています。
+commentShareModeは2相当で動作します。後述のコメント共用機能のパイプ名は
+"/var/local/jktask/chat_{プロセスID}.fifo" および
+"/var/local/jktask/post_{プロセスID}.fifo" です。
+EpgTimerSrvからチューナー情報を随時取得し、EpgTimerSrvによるEpgDataCap_Bonの起動
+に連動して、受信中のチャンネルに対応する実況を取得する仕組みです。
+
 ■他プロセスとのコメント共用機能の仕様(開発者むけ)
 NicoJK.iniのcommentShareModeを1にすると受信中のchatタグを名前付きパイプ:
 "\\.\pipe\chat_d7b64ac2_{プロセスID}" から取得できる。さらに、commentShareModeを

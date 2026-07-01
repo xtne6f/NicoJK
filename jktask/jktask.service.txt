@@ -1,0 +1,13 @@
+[Unit]
+Description=Jikkyo reception and forwarding service
+After=network.target
+
+[Service]
+ExecStart={BINDIR}/jktask
+StandardError=journal
+StandardOutput=null
+Type=simple
+User={USER}
+
+[Install]
+WantedBy=default.target
