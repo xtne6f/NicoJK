@@ -13,7 +13,7 @@
 
 ■使い方
 NicoJK.tvtpおよびNicoJK.iniをTVTestのPluginフォルダに入れてください。jkcnsl.exe
-はTVTest.exeのあるフォルダに入れてください。
+JkcnslLoginWindow.exeはTVTest.exeのあるフォルダに入れてください。
 
 ログファイルへの記録機能は、NicoJK.iniのlogfileModeを1か2にして、Pluginsフォルダ
 の中に"NicoJK"というフォルダを作っておくと有効になります。ログは"NicoJK"フォルダ
@@ -115,7 +115,7 @@ https://github.com/rutice/NicoJK/downloads
 
 ■ソースコード
 https://github.com/rutice/NicoJK
-※このフォークのソースコードは https://github.com/xt4ubq/NicoJK
+※このフォークのソースコードは https://github.com/xtne6f/NicoJK
 
 ■Linux環境むけ
 jkimlogおよびjkrdlogはLinuxでもビルドできます。加えてチューナープロセス(今のとこ
